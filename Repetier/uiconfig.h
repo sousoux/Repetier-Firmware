@@ -58,7 +58,7 @@ Select the language to use.
 1 = german
 2 = dutch
 */
-#define UI_LANGUAGE 1
+#define UI_LANGUAGE 0
 #include "uilang.h"
 
 /** Select type of beeper

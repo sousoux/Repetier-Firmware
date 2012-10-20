@@ -779,7 +779,7 @@ inline void set_delta_position(long xaxis, long yaxis, long zaxis) {
   @param deltaPosSteps Result array with tower coordinates.
   @returns 1 if cartesian coordinates have a valid delta tower position 0 if not.
 */
-inline byte calculate_delta(long cartesianPosSteps[], long deltaPosSteps[]) {
+byte calculate_delta(long cartesianPosSteps[], long deltaPosSteps[]) {
 	long temp;
 	long opt = sq(DELTA_TOWER1_Y_STEPS - cartesianPosSteps[Y_AXIS]);
 
@@ -910,7 +910,7 @@ void split_delta_move(byte check_endstops,byte pathOptimize, byte softEndstop) {
 		difference[i] = printer_state.destinationSteps[i] - printer_state.currentPositionSteps[i];
 		axis_diff[i] = difference[i] * inv_axis_steps_per_unit[i];
 	}
-  printer_state.filamentPrinted+=p->axis_diff[3];
+    printer_state.filamentPrinted+=axis_diff[3];
 
 #if max_software_endstop_r == true
 // TODO - Implement radius checking

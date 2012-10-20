@@ -2019,7 +2019,7 @@ void UIDisplay::executeAction(int action) {
 		calculate_delta(printer_state.currentPositionSteps, printer_state.currentDeltaPositionSteps);
 		out.println_P(PSTR("Measured origin set. Measurement reset."));
 #if EEPROM_MODE!=0
-		epr_set_rod_length();
+		epr_data_to_eeprom(false);
 		out.println_P(PSTR("EEPROM updated"));
 #endif
 	}

@@ -365,7 +365,6 @@ extern byte get_coordinates(GCode *com);
 extern void move_steps(long x,long y,long z,long e,float feedrate,bool waitEnd,bool check_endstop);
 extern void queue_move(byte check_endstops,byte pathOptimize);
 #if DRIVE_SYSTEM==3
-extern byte calculate_delta(long cartesianPosSteps[], long deltaPosSteps[]);
 extern void set_delta_position(long xaxis, long yaxis, long zaxis);
 extern float rodMaxLength;
 extern void split_delta_move(byte check_endstops,byte pathOptimize, byte softEndstop);
@@ -522,6 +521,7 @@ typedef struct {
 extern DeltaSegment segments[];					// Delta segment cache
 extern unsigned int delta_segment_write_pos; 	// Position where we write the next cached delta move
 extern volatile unsigned int delta_segment_count; // Number of delta moves cached 0 = nothing in cache
+extern byte calculate_delta(long cartesianPosSteps[], long deltaPosSteps[]);
 #endif
 typedef struct { // RAM usage: 24*4+15 = 111 Byte
   byte primaryAxis;

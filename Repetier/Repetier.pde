@@ -1034,7 +1034,7 @@ inline long bresenham_step() {
 				}
 			}
 	#endif
-			if(lines_count<=cur->primaryAxis) {cur=0;return 2000;}
+//			if(lines_count<=cur->primaryAxis) {cur=0;return 2000;}
 			lines_pos++;
 			if(lines_pos>=MOVE_CACHE_SIZE) lines_pos=0;
 			long wait = cur->accelerationPrim;
