@@ -6,7 +6,7 @@
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
 
-    Foobar is distributed in the hope that it will be useful,
+    Repetier-Firmware is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
@@ -21,8 +21,64 @@
 
 #ifndef _REPETIER_H
 #define _REPETIER_H
+#include "Configuration.h"
 
+#if MOTHERBOARD != 401
 #include <avr/io.h>
+#else
+#define PROGMEM
+#define PGM_P const char *
+#define PSTR(s) s
+#define pgm_read_byte_near(x) (*(char*)x)
+#define pgm_read_byte(x) (*(char*)x)
+#endif
+// ##########################################################################################
+// ##                                  Debug configuration                                 ##
+// ##########################################################################################
+
+/** Uncomment, to see detailed data for every move. Only for debugging purposes! */
+//#define DEBUG_QUEUE_MOVE
+/** Allows M111 to set bit 5 (16) which disables all commands except M111. This can be used
+to test your data througput or search for communication problems. */
+#define INCLUDE_DEBUG_COMMUNICATION
+/** Allows M111 so set bit 6 (32) which disables moves, at the first tried step. In combination
+with a dry run, you can test the speed of path computations, which are still performed. */
+//#define INCLUDE_DEBUG_NO_MOVE
+/** Writes the free RAM to output, if it is less then at the last test. Should always return
+values >500 for safety, since it doesn't catch every function call. Nice to tweak cache
+usage or for seraching for memory induced errors. Switch it off for production, it costs execution time. */
+//#define DEBUG_FREE_MEMORY
+//#define DEBUG_ADVANCE
+/** \brief print ops related debug info. */
+//#define DEBUG_OPS
+/** If enabled, writes the created generic table to serial port at startup. */
+//#define DEBUG_GENERIC
+/** If enabled, steps to move and moved steps are compared. */
+//#define DEBUG_STEPCOUNT
+// Uncomment the following line to enable debugging. You can better control debugging below the following line
+//#define DEBUG
+
+
+// Uncomment if no analyzer is connected
+//#define ANALYZER
+// Channel->pin assignments
+#define ANALYZER_CH0 63 // New move
+#define ANALYZER_CH1 40 // Step loop
+#define ANALYZER_CH2 53 // X Step
+#define ANALYZER_CH3 65 // Y Step
+#define ANALYZER_CH4 59 // Serial out
+#define ANALYZER_CH5 64 // Step 0
+#define ANALYZER_CH6 58 // Step Signal
+#define ANALYZER_CH7 1 // Constant speed
+
+#ifdef ANALYZER
+#define ANALYZER_ON(a) {WRITE(a,HIGH);}
+#define ANALYZER_OFF(a) {WRITE(a,LOW);}
+#else
+#define ANALYZER_ON(a)
+#define ANALYZER_OFF(a)
+#endif
+
 
 // Bits of the ADC converter
 #define ANALOG_INPUT_BITS 10
@@ -40,8 +96,11 @@
 #define MICROSTEP8 HIGH,HIGH
 #define MICROSTEP16 HIGH,HIGH
 
-#include "Configuration.h"
 
+//Step to split a cirrcle in small Lines 
+#define MM_PER_ARC_SEGMENT 1
+//After this count of steps a new SIN / COS caluclation is startet to correct the circle interpolation
+#define N_ARC_CORRECTION 25
 #define KOMMA
 #if NUM_EXTRUDER>0 && EXT0_TEMPSENSOR_TYPE<100
 #define EXT0_ANALOG_INPUTS 1
@@ -74,6 +133,12 @@
 #define BED_ANALOG_CHANNEL
 #endif
 
+#ifndef DEBUG_FREE_MEMORY
+#define DEBUG_MEMORY
+#else
+#define DEBUG_MEMORY check_mem();
+#endif
+
 /** \brief number of analog input signals. Normally 1 for each temperature sensor */
 #define ANALOG_INPUTS (EXT0_ANALOG_INPUTS+EXT1_ANALOG_INPUTS+BED_ANALOG_INPUTS)
 #if ANALOG_INPUTS>0
@@ -82,7 +147,7 @@
 #endif
 #define ANALOG_PRESCALER _BV(ADPS0)|_BV(ADPS1)|_BV(ADPS2)
 
-#if MOTHERBOARD==8 || MOTHERBOARD==9
+#if MOTHERBOARD==8 || MOTHERBOARD==9 || MOTHERBOARD==401
 #define EXTERNALSERIAL
 #endif
 //#define EXTERNALSERIAL  // Force using arduino serial
@@ -99,8 +164,18 @@
 #define COMPAT_PRE1
 #endif
 #include "gcode.h"
+#if MOTHERBOARD != 401
 #include "fastio.h"
-#ifdef SDSUPPORT
+#else
+#define		READ(IO)				digitalRead(IO)
+#define		WRITE(IO, v)			digitalWrite(IO, v)
+#define		SET_INPUT(IO)			pinMode(IO, INPUT)
+#define		SET_OUTPUT(IO)		pinMode(IO, OUTPUT)
+#endif
+#ifndef SDSUPPORT
+#define SDSUPPORT false
+#endif
+#if SDSUPPORT
 #include "SdFat.h"
 #endif
 #define REPETIER_VERSION "0.80dev"
@@ -202,7 +277,7 @@ typedef struct { // Size: 12*1 Byte+12*4 Byte+4*2Byte = 68 Byte
   TemperatureController tempControl;
 } Extruder;
 
-extern const uint8 osAnalogInputChannels[] PROGMEM;
+extern const uint8 osAnalogInputChannels[];
 extern uint8 osAnalogInputCounter[ANALOG_INPUTS];
 extern uint osAnalogInputBuildup[ANALOG_INPUTS];
 extern uint8 osAnalogInputPos; // Current sampling position
@@ -221,6 +296,7 @@ extern Extruder extruder[];
 // Initalize extruder and heated bed related pins
 extern void initExtruder();
 extern void initHeatedBed();
+extern void updateTempControlVars(TemperatureController *tc);
 extern void extruder_select(byte ext_num);
 // Set current extruder position
 //extern void extruder_set_position(float pos,bool relative);
@@ -365,6 +441,7 @@ extern byte get_coordinates(GCode *com);
 extern void move_steps(long x,long y,long z,long e,float feedrate,bool waitEnd,bool check_endstop);
 extern void queue_move(byte check_endstops,byte pathOptimize);
 #if DRIVE_SYSTEM==3
+extern byte calculate_delta(long cartesianPosSteps[], long deltaPosSteps[]);
 extern void set_delta_position(long xaxis, long yaxis, long zaxis);
 extern float rodMaxLength;
 extern void split_delta_move(byte check_endstops,byte pathOptimize, byte softEndstop);
@@ -380,6 +457,9 @@ extern inline void disable_z();
 extern inline void enable_x();
 extern inline void enable_y();
 extern inline void enable_z();
+
+#define PREVIOUS_PLANNER_INDEX(p) {p--;if(p==255) p = MOVE_CACHE_SIZE-1;}
+#define NEXT_PLANNER_INDEX(idx) {++idx;if(idx==MOVE_CACHE_SIZE) idx=0;}
 
 extern void kill(byte only_steppers);
 
@@ -404,6 +484,10 @@ extern void setupTimerInterrupt();
 extern void digipot_init();
 extern void microstep_init();
 extern void print_temperatures();
+extern void check_mem();
+#if ARC_SUPPORT
+extern void mc_arc(float *position, float *target, float *offset, float radius, uint8_t isclockwise);
+#endif
 
 typedef struct { 
   byte flag0; // 1 = stepper disabled, 2 = use external extruder interrupt
@@ -472,13 +556,17 @@ typedef struct {
   long offsetY;                     ///< Y-offset for different extruder positions.
   unsigned int vMaxReached;         ///< MAximumu reached speed
   byte stepper_loops;
-  long msecondsPrinting;            ///< Milliseconds of printing time (means time with heated extruder)
+  unsigned long msecondsPrinting;            ///< Milliseconds of printing time (means time with heated extruder)
   float filamentPrinted;            ///< mm of filament printed since counting started
+  byte waslasthalfstepping;         ///< Indicates if last move had halfstepping enabled
 #if ENABLE_BACKLASH_COMPENSATION
   float backlashX;
   float backlashY;
   float backlashZ;
   byte backlashDir;
+#endif
+#ifdef DEBUG_STEPCOUNT
+  long totalStepsRemaining;
 #endif
 } PrinterState;
 extern PrinterState printer_state;
@@ -521,7 +609,7 @@ typedef struct {
 extern DeltaSegment segments[];					// Delta segment cache
 extern unsigned int delta_segment_write_pos; 	// Position where we write the next cached delta move
 extern volatile unsigned int delta_segment_count; // Number of delta moves cached 0 = nothing in cache
-extern byte calculate_delta(long cartesianPosSteps[], long deltaPosSteps[]);
+extern byte lastMoveID;
 #endif
 typedef struct { // RAM usage: 24*4+15 = 113 Byte
   byte primaryAxis;
@@ -542,10 +630,9 @@ typedef struct { // RAM usage: 24*4+15 = 113 Byte
   float startSpeed;               ///< Staring speed in mm/s
   float endSpeed;                 ///< Exit speed in mm/s
   float distance;
-  //float startFactor;
-  //float endFactor;
 #if DRIVE_SYSTEM==3
   byte numDeltaSegments;		  		///< Number of delta segments left in line. Decremented by stepper timer.
+  byte moveID;							///< ID used to identify moves which are all part of the same line
   int deltaSegmentReadPos; 	 			///< Pointer to next DeltaSegment
   long numPrimaryStepPerSegment;		///< Number of primary bresenham axis steps in each delta segment
 #endif
@@ -581,9 +668,6 @@ extern byte lines_pos; // Position for executing line movement
 extern volatile byte lines_count; // Number of lines cached 0 = nothing to do
 extern byte printmoveSeen;
 extern long baudrate;
-#ifdef SIMULATE_FAN_PWM
-extern int fan_speed;
-#endif
 #if OS_ANALOG_INPUTS>0
 // Get last result for pin x
 extern volatile uint osAnalogInputValues[OS_ANALOG_INPUTS];
@@ -616,7 +700,7 @@ extern TemperatureController heatedBedController;
 extern TemperatureController *tempController[NUM_TEMPERATURE_LOOPS];
 extern byte autotuneIndex;
 
-#ifdef SDSUPPORT
+#if SDSUPPORT
 
 #define SD_MAX_FOLDER_DEPTH 2
 
@@ -663,6 +747,7 @@ public:
   char *createFilename(char *buffer,const dir_t &p);
   void makeDirectory(char *filename);
   bool showFilename(const uint8_t *name);
+  void automount();
 private:
   void lsRecursive(SdBaseFile *parent,byte level);
  // SdFile *getDirectory(char* name);
@@ -714,31 +799,6 @@ inline void  enable_z() {
 #endif
 }
 
-// ##########################################################################################
-// ##                                  Debug configuration                                 ##
-// ##########################################################################################
-
-/** Uncomment, to see detailed data for every move. Only for debugging purposes! */
-//#define DEBUG_QUEUE_MOVE
-/** Allows M111 to set bit 5 (16) which disables all commands except M111. This can be used
-to test your data througput or search for communication problems. */
-#define INCLUDE_DEBUG_COMMUNICATION
-/** Allows M111 so set bit 6 (32) which disables moves, at the first tried step. In combination
-with a dry run, you can test the speed of path computations, which are still performed. */
-//#define INCLUDE_DEBUG_NO_MOVE
-/** Writes the free RAM to output, if it is less then at the last test. Should always return
-values >500 for safety, since it doesn't catch every function call. Nice to tweak cache
-usage or for seraching for memory induced errors. Switch it off for production, it costs execution time. */
-//#define DEBUG_FREE_MEMORY
-//#define DEBUG_ADVANCE
-/** \brief print ops related debug info. */
-//#define DEBUG_OPS
-/** If enabled, writes the created generic table to serial port at startup. */
-//#define DEBUG_GENERIC
-/** If enabled, steps to move and moved steps are compared. */
-//#define DEBUG_STEPCOUNT
-// Uncomment the following line to enable debugging. You can better control debugging below the following line
-//#define DEBUG
 
 #if DRIVE_SYSTEM==3
 #define SIN_60 0.8660254037844386

@@ -6,7 +6,7 @@
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
 
-    Foobar is distributed in the hope that it will be useful,
+    Repetier-Firmware is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
@@ -911,7 +911,7 @@ void UIDisplay::parse(char *txt,bool ram) {
         if(c2=='c') fvalue=current_extruder->tempControl.currentTemperatureC;
         else if(c2>='0' && c2<='9') fvalue=extruder[c2-'0'].tempControl.currentTemperatureC;
         else if(c2=='b') fvalue=heated_bed_get_temperature();
-        addFloat(fvalue,3,1);
+        addFloat(fvalue,3,UI_TEMP_PRECISION);
         break;
       case 'E': // Target extruder temperature
         if(c2=='c') fvalue=current_extruder->tempControl.targetTemperatureC;
@@ -919,7 +919,7 @@ void UIDisplay::parse(char *txt,bool ram) {
 #if HAVE_HEATED_BED
         else if(c2=='b') fvalue=heatedBedController.targetTemperatureC;
 #endif
-        addFloat(fvalue,3,1);
+        addFloat(fvalue,3,UI_TEMP_PRECISION);
         break;
   
       case 'f':
@@ -954,7 +954,7 @@ void UIDisplay::parse(char *txt,bool ram) {
         break;
       case 'o': 
         if(c2=='s') {
-#ifdef SDSUPPORT
+#if SDSUPPORT
           if(sd.sdactive && sd.sdmode) {
             addStringP(PSTR( UI_TEXT_PRINT_POS));
             unsigned long percent;
@@ -1024,38 +1024,38 @@ void UIDisplay::parse(char *txt,bool ram) {
         break;
       case 's': // Endstop positions
         if(c2=='x') {
-        #if (X_MIN_PIN > -1)
+        #if (X_MIN_PIN > -1) && MIN_HARDWARE_ENDSTOP_X
           addStringP((READ(X_MIN_PIN)^ENDSTOP_X_MIN_INVERTING)?ui_text_on:ui_text_off);
         #else
           addStringP(ui_text_na);
       	#endif
         }
         if(c2=='X')
-      	#if (X_MAX_PIN > -1)
+      	#if (X_MAX_PIN > -1) && MAX_HARDWARE_ENDSTOP_X
           addStringP((READ(X_MAX_PIN)^ENDSTOP_X_MAX_INVERTING)?ui_text_on:ui_text_off);
         #else
           addStringP(ui_text_na);
       	#endif
         if(c2=='y')
-      	#if (Y_MIN_PIN > -1)
+      	#if (Y_MIN_PIN > -1)&& MIN_HARDWARE_ENDSTOP_Y
           addStringP((READ(Y_MIN_PIN)^ENDSTOP_Y_MIN_INVERTING)?ui_text_on:ui_text_off);
         #else
           addStringP(ui_text_na);
       	#endif
         if(c2=='Y')
-      	#if (Y_MAX_PIN > -1)
+      	#if (Y_MAX_PIN > -1) && MAX_HARDWARE_ENDSTOP_Y
           addStringP((READ(Y_MAX_PIN)^ENDSTOP_Y_MAX_INVERTING)?ui_text_on:ui_text_off);
         #else
           addStringP(ui_text_na);
       	#endif
         if(c2=='z')
-      	#if (Z_MIN_PIN > -1)
+      	#if (Z_MIN_PIN > -1) && MIN_HARDWARE_ENDSTOP_Z
           addStringP((READ(Z_MIN_PIN)^ENDSTOP_Z_MIN_INVERTING)?ui_text_on:ui_text_off);
         #else
           addStringP(ui_text_na);
       	#endif
         if(c2=='Z')
-      	#if (Z_MAX_PIN > -1)
+      	#if (Z_MAX_PIN > -1) && MAX_HARDWARE_ENDSTOP_Z
           addStringP((READ(Z_MAX_PIN)^ENDSTOP_Z_MAX_INVERTING)?ui_text_on:ui_text_off);
         #else
           addStringP(ui_text_na);
@@ -1088,7 +1088,7 @@ void UIDisplay::setStatus(char *txt) {
 }
 
 const UIMenu * const ui_pages[UI_NUM_PAGES] PROGMEM = UI_PAGES;
-#ifdef SDSUPPORT
+#if SDSUPPORT
 byte nFilesOnCard;
 
 void UIDisplay::updateSDFileCount() {
@@ -1210,7 +1210,7 @@ void UIDisplay::refreshPage() {
       printRow(r,(char*)printCols);
     }
   }
-#ifdef SDSUPPORT
+#if SDSUPPORT
     if(mtype==1) {
       sdrefresh(r);
     }
@@ -1228,7 +1228,7 @@ void UIDisplay::pushMenu(void *men,bool refresh) {
   menuLevel++;
   menu[menuLevel]=men;
   menuTop[menuLevel] = menuPos[menuLevel] = 0;
-#ifdef SDSUPPORT
+#if SDSUPPORT
   UIMenu *men2 = (UIMenu*)menu[menuLevel];
   if(pgm_read_byte(&(men2->menuType))==1) // Open files list
     updateSDFileCount();
@@ -1266,7 +1266,7 @@ void UIDisplay::okAction() {
       activeAction = action;
     return;
   }
-#ifdef SDSUPPORT
+#if SDSUPPORT
   if(mtype==1) {
     if(menuPos[menuLevel]==0) { // Selected back instead of file
       executeAction(UI_ACTION_BACK);
@@ -1363,7 +1363,7 @@ void UIDisplay::nextPreviousAction(char next) {
       menuTop[menuLevel]=menuPos[menuLevel]+1-UI_ROWS;
     return;
   }
-#ifdef SDSUPPORT
+#if SDSUPPORT
     if(mtype==1) { // SD listing
       if(next>0) {
         if(menuPos[menuLevel]<nFilesOnCard) menuPos[menuLevel]++;
@@ -1810,7 +1810,7 @@ void UIDisplay::executeAction(int action) {
       BEEP_LONG;skipBeep = true;
       break;
 #endif
-#ifdef SDSUPPORT
+#if SDSUPPORT
     case UI_ACTION_SD_DELETE:
       if(sd.sdactive){
         pushMenu((void*)&ui_menu_sd_fileselector,false);

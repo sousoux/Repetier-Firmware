@@ -6,7 +6,7 @@
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
 
-    Foobar is distributed in the hope that it will be useful,
+    Repetier-Firmware is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
@@ -22,7 +22,9 @@
 #include "Reptier.h"
 #include "pins_arduino.h"
 #include "ui.h"
-#include "eeprom.h"
+#if EEPROM_MODE!=0
+#include "Eeprom.h"
+#endif
 
 Extruder *current_extruder;
 Extruder extruder[NUM_EXTRUDER] = {
@@ -235,6 +237,14 @@ void initExtruder() {
 #endif
   
 }
+void updateTempControlVars(TemperatureController *tc) {
+#ifdef TEMP_PID
+    if(tc->pidIGain) { // prevent division by zero
+       tc->tempIStateLimitMax = (float)tc->pidDriveMax*10.0f/tc->pidIGain;
+       tc->tempIStateLimitMin = (float)tc->pidDriveMin*10.0f/tc->pidIGain;
+    }
+#endif
+}
 // ------------------------------------------------------------------------------------------------------------------
 // ---------------------------------------------- extruder_select ---------------------------------------------------
 // ------------------------------------------------------------------------------------------------------------------
@@ -247,11 +257,11 @@ void extruder_select(byte ext_num) {
    if(ext_num>=NUM_EXTRUDER)
      ext_num = 0;
    current_extruder->extrudePosition = printer_state.currentPositionSteps[3];
-   printer_state.destinationSteps[0] -= current_extruder->xOffset;
-   printer_state.destinationSteps[1] -= current_extruder->yOffset;
+   long dx = -current_extruder->xOffset;
+   long dy = -current_extruder->yOffset;
    current_extruder = &extruder[ext_num];
-   printer_state.destinationSteps[0] += current_extruder->xOffset;
-   printer_state.destinationSteps[1] += current_extruder->yOffset;
+   dx += current_extruder->xOffset;
+   dy += current_extruder->yOffset;
 #ifdef SEPERATE_EXTRUDER_POSITIONS
    // Use seperate extruder positions only if beeing told. Slic3r e.g. creates a continuous extruder position increment
    printer_state.currentPositionSteps[3] = current_extruder->extrudePosition;
@@ -277,12 +287,7 @@ void extruder_select(byte ext_num) {
    float fmax=((float)F_CPU/((float)printer_state.maxExtruderSpeed*TIMER0_PRESCALE*axis_steps_per_unit[3]))*60.0; // Limit feedrate to interrupt speed
    if(fmax<max_feedrate[3]) max_feedrate[3] = fmax;
 #endif
-#ifdef TEMP_PID
-    if(current_extruder->tempControl.pidIGain) { // prevent division by zero
-       current_extruder->tempControl.tempIStateLimitMax = (float)current_extruder->tempControl.pidDriveMax*10.0f/current_extruder->tempControl.pidIGain;
-       current_extruder->tempControl.tempIStateLimitMin = (float)current_extruder->tempControl.pidDriveMin*10.0f/current_extruder->tempControl.pidIGain;
-    }
-#endif
+   updateTempControlVars(&current_extruder->tempControl);
 #if USE_OPS==1
    printer_state.opsRetractSteps = printer_state.opsRetractDistance*current_extruder->stepsPerMM;
    printer_state.opsPushbackSteps = (printer_state.opsRetractDistance+printer_state.opsRetractBacklash)*current_extruder->stepsPerMM;
@@ -291,11 +296,11 @@ void extruder_select(byte ext_num) {
    else
      printer_state.opsMoveAfterSteps = (int)(-(float)printer_state.opsRetractSteps*(100.0-printer_state.opsMoveAfter)*0.01);
 #endif
-#if DRIVE_SYSTEM==3
-	split_delta_move(false,true, true);
-#else
-   queue_move(false,true); // Move head of new extruder to old position using last feedrate
-#endif
+  if(dx || dy) {
+    float oldfeedrate = printer_state.feedrate;
+    move_steps(dx,dy,0,0,homing_feedrate[0],false,ALWAYS_CHECK_ENDSTOPS);
+    printer_state.feedrate = oldfeedrate;
+  }
 }
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -303,6 +308,9 @@ void extruder_select(byte ext_num) {
 // ------------------------------------------------------------------------------------------------------------------
 
 void extruder_set_temperature(float temp_celsius,byte extr) {
+  bool alloffs = true;
+  for(byte i=0;i<NUM_EXTRUDER;i++)
+    if(tempController[i]->targetTemperatureC>15) alloffs = false;
 #ifdef MAXTEMP
   if(temp_celsius>MAXTEMP) temp_celsius = MAXTEMP;
 #endif
@@ -322,6 +330,8 @@ void extruder_set_temperature(float temp_celsius,byte extr) {
     if(tempController[i]->targetTemperatureC>15) alloff = false;
   if(alloff)
     epr_update_usage();
+  if(alloffs && !alloff)
+    printer_state.msecondsPrinting = millis();
 }
 
 // ------------------------------------------------------------------------------------------------------------------

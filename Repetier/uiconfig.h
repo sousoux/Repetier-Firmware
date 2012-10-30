@@ -6,7 +6,7 @@
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
 
-    Foobar is distributed in the hope that it will be useful,
+    Repetier-Firmware is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
@@ -110,6 +110,13 @@ Typical values are 16 and 20
 Rows of your display. 2 or 4
 */
 #define UI_ROWS 4
+
+// Define precision for temperatures. With small displays only integer values fit.
+#if UI_COLS>16
+#define UI_TEMP_PRECISION 1
+#else
+#define UI_TEMP_PRECISION 0
+#endif
 
 /* What type of chip is used for I2C communication
 0 : PCF8574 or PCF8574A or compatible chips.

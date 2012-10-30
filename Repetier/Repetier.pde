@@ -6,7 +6,7 @@
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
 
-    Foobar is distributed in the hope that it will be useful,
+    Repetier-Firmware is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
@@ -90,7 +90,7 @@ Custom M Codes
 - M201 - Set max acceleration in units/s^2 for print moves (M201 X1000 Y1000)
 - M202 - Set max acceleration in units/s^2 for travel moves (M202 X1000 Y1000)
 - M203 - Set temperture monitor to Sx
-- M204 - Set PID parameter X => Kp Y => Ki Z => Kd
+- M204 - Set PID parameter X => Kp Y => Ki Z => Kd S<extruder> Default is current extruder. NUM_EXTRUDER=Heated bed
 - M205 - Output EEPROM settings
 - M206 - Set EEPROM value
 - M220 S<Feedrate multiplier in percent> - Increase/decrease given feedrate
@@ -98,6 +98,9 @@ Custom M Codes
 - M231 S<OPS_MODE> X<Min_Distance> Y<Retract> Z<Backlash> F<ReatrctMove> - Set OPS parameter
 - M232 - Read and reset max. advance values
 - M233 X<AdvanceK> - Set temporary advance K-value to X
+- M350 S<mstepsAll> X<mstepsX> Y<mstepsY> Z<mstepsZ> E<mstepsE0> P<mstespE1> : Set microstepping on RAMBO board
+- M400 - Wait until move buffers empty.
+- M908 P<address> S<value> : Set stepper current for digipot (RAMBO board)
 */
 
 #include "Reptier.h"
@@ -200,6 +203,7 @@ byte STEP_PIN[3] = {X_STEP_PIN, Y_STEP_PIN, Z_STEP_PIN};
 DeltaSegment segments[DELTA_CACHE_SIZE];
 unsigned int delta_segment_write_pos = 0; // Position where we write the next cached delta move
 volatile unsigned int  delta_segment_count = 0; // Number of delta moves cached 0 = nothing in cache
+byte lastMoveID = 0; // Last move ID
 #endif
 PrinterState printer_state;
 byte relative_mode = false;  ///< Determines absolute (false) or relative Coordinates (true).
@@ -213,8 +217,8 @@ unsigned long stepper_inactive_time = STEPPER_INACTIVE_TIME*1000L;
 PrintLine lines[MOVE_CACHE_SIZE]; ///< Cache for print moves.
 PrintLine *cur = 0;               ///< Current printing line
 byte lines_write_pos=0;           ///< Position where we write the next cached line move.
-byte lines_pos=0;                 ///< Position for executing line movement.
 volatile byte lines_count=0;      ///< Number of lines cached 0 = nothing to do.
+byte lines_pos=0;                 ///< Position for executing line movement.
 long baudrate = BAUDRATE;         ///< Communication speed rate.
 #ifdef USE_ADVANCE
 #ifdef ENABLE_QUADRATIC_ADVANCE
@@ -324,6 +328,34 @@ Interrupt routines to measure analog values and for the stepper timerloop are st
 */
 void setup()
 {
+#ifdef ANALYZER
+// Channel->pin assignments
+#if ANALYZER_CH0>=0
+pinMode(ANALYZER_CH0,OUTPUT);
+#endif
+#if ANALYZER_CH1>=0
+pinMode(ANALYZER_CH1,OUTPUT);
+#endif
+#if ANALYZER_CH2>=0
+pinMode(ANALYZER_CH2,OUTPUT);
+#endif
+#if ANALYZER_CH3>=0
+pinMode(ANALYZER_CH3,OUTPUT);
+#endif
+#if ANALYZER_CH4>=0
+pinMode(ANALYZER_CH4,OUTPUT);
+#endif
+#if ANALYZER_CH5>=0
+pinMode(ANALYZER_CH5,OUTPUT);
+#endif
+#if ANALYZER_CH6>=0
+pinMode(ANALYZER_CH6,OUTPUT);
+#endif
+#if ANALYZER_CH7>=0
+pinMode(ANALYZER_CH7,OUTPUT);
+#endif
+#endif
+
 #ifdef ENABLE_POWER_ON_STARTUP
   if(PS_ON_PIN > -1) {
      pinMode(PS_ON_PIN,OUTPUT); //GND
@@ -366,37 +398,37 @@ void setup()
 #endif
 
   //endstop pullups
-#if X_MIN_PIN>-1
+#if X_MIN_PIN>-1 && MIN_HARDWARE_ENDSTOP_X
   SET_INPUT(X_MIN_PIN);
 #if ENDSTOP_PULLUP_X_MIN
   WRITE(X_MIN_PIN,HIGH);
 #endif
 #endif
-#if Y_MIN_PIN>-1
+#if Y_MIN_PIN>-1 && MIN_HARDWARE_ENDSTOP_Y
   SET_INPUT(Y_MIN_PIN);
 #if ENDSTOP_PULLUP_Y_MIN
   WRITE(Y_MIN_PIN,HIGH);
 #endif
 #endif
-#if Z_MIN_PIN>-1
+#if Z_MIN_PIN>-1 && MIN_HARDWARE_ENDSTOP_Z
   SET_INPUT(Z_MIN_PIN);
 #if ENDSTOP_PULLUP_Z_MIN
   WRITE(Z_MIN_PIN,HIGH);
 #endif
 #endif
-#if X_MAX_PIN>-1
+#if X_MAX_PIN>-1 && MAX_HARDWARE_ENDSTOP_X
   SET_INPUT(X_MAX_PIN);
 #if ENDSTOP_PULLUP_X_MAX
   WRITE(X_MAX_PIN,HIGH);
 #endif
 #endif
-#if Y_MAX_PIN>-1
+#if Y_MAX_PIN>-1 && MAX_HARDWARE_ENDSTOP_Y
   SET_INPUT(Y_MAX_PIN);
 #if ENDSTOP_PULLUP_Y_MAX
   WRITE(Y_MAX_PIN,HIGH);
 #endif
 #endif
-#if Z_MAX_PIN>-1
+#if Z_MAX_PIN>-1 && MAX_HARDWARE_ENDSTOP_Z
   SET_INPUT(Z_MAX_PIN);
 #if ENDSTOP_PULLUP_Z_MAX
   WRITE(Z_MAX_PIN,HIGH);
@@ -425,7 +457,7 @@ void setup()
   printer_state.opsRetractBacklash = OPS_RETRACT_BACKLASH;
   printer_state.filamentRetracted = false;
 #endif
-  printer_state.feedrate = 3000; ///< Current feedrate in mm/min.
+  printer_state.feedrate = 50; ///< Current feedrate in mm/min.
   printer_state.feedrateMultiply = 100;
   printer_state.extrudeMultiply = 100; // Is 10.24 * value here 100 percent)
 #ifdef USE_ADVANCE
@@ -452,6 +484,7 @@ void setup()
   printer_state.xMin = X_MIN_POS;
   printer_state.yMin = Y_MIN_POS;
   printer_state.zMin = Z_MIN_POS;
+  printer_state.waslasthalfstepping = 0;
 #if ENABLE_BACKLASH_COMPENSATION
   printer_state.backlashX = X_BACKLASH;
   printer_state.backlashY = Y_BACKLASH;
@@ -476,7 +509,7 @@ void setup()
   epr_init(); // Read settings from eeprom if wanted
   update_ramps_parameter();
 
-#ifdef SDSUPPORT
+#if SDSUPPORT
 
   sd.initsd();
 
@@ -508,7 +541,7 @@ void loop()
   //UI_SLOW; // do longer timed user interface action
   UI_MEDIUM; // do check encoder
   if(code){
-#ifdef SDSUPPORT
+#if SDSUPPORT
     if(sd.savetosd){
         if(!(GCODE_HAS_M(code) && code->M==29)) { // still writing to file
             sd.write_command(code);
@@ -538,10 +571,11 @@ void loop()
     previous_millis_cmd = curtime;
   if(max_inactive_time!=0 && (curtime-previous_millis_cmd) >  max_inactive_time ) kill(false);
   if(stepper_inactive_time!=0 && (curtime-previous_millis_cmd) >  stepper_inactive_time ) { kill(true); }
-  //void finishNextSegment();
-#ifdef DEBUG_FREE_MEMORY
-  send_mem();
+#if defined(SDCARDDETECT) && SDCARDDETECT>-1
+  sd.automount();
 #endif
+  //void finishNextSegment();
+  DEBUG_MEMORY;
 }
 
 
@@ -837,7 +871,7 @@ byte get_coordinates(GCode *com)
       else
         printer_state.feedrate = com->F*(float)printer_state.feedrateMultiply*0.00016666666f;
   }
-  return r || (GCODE_HAS_E(com) && printer_state.destinationSteps[3]!=printer_state.currentPositionSteps[3]); // ignore unprductive moves
+  return r || (GCODE_HAS_E(com) && printer_state.destinationSteps[3]!=printer_state.currentPositionSteps[3]); // ignore unproductive moves
 }
 inline unsigned int ComputeV(long timer,long accel) {
   unsigned int res;
@@ -1006,7 +1040,7 @@ inline long bresenham_step() {
 				}
 			}
 	#endif
-//			if(lines_count<=cur->primaryAxis) {cur=0;return 2000;}
+			if(lines_count<=cur->primaryAxis) {cur=0;return 2000;}
 			lines_pos++;
 			if(lines_pos>=MOVE_CACHE_SIZE) lines_pos=0;
 			long wait = cur->accelerationPrim;
@@ -1014,7 +1048,6 @@ inline long bresenham_step() {
 			--lines_count;
 			return(wait); // waste some time for path optimization to fill up
 		} // End if WARMUP
-		// Set up delta segments
 		if(cur->dir & 128) extruder_enable();
 		cur->joinFlags |= FLAG_JOIN_END_FIXED | FLAG_JOIN_START_FIXED; // don't touch this segment any more, just for safety
 	#if USE_OPS==1
@@ -1069,6 +1102,7 @@ inline long bresenham_step() {
 		} // End if opsMode
 	#endif
 		sei(); // Allow interrupts
+		// Set up delta segments
 		if (cur->numDeltaSegments) {
 			// If there are delta segments point to them here
 			curd = &segments[cur->deltaSegmentReadPos++];
@@ -1140,7 +1174,13 @@ inline long bresenham_step() {
 		printer_state.extruderStepsNeeded+=tred-printer_state.advance_steps_set;
 		printer_state.advance_steps_set = tred;
 	#endif
-		return printer_state.interval; // Wait an other 50% fro last step to make the 100% full
+    if(printer_state.waslasthalfstepping && cur->halfstep==0) { // Switch halfstepping -> full stepping
+      printer_state.waslasthalfstepping = 0;
+      return printer_state.interval*3; // Wait an other 150% from last half step to make the 100% full
+    } else if(!printer_state.waslasthalfstepping && cur->halfstep) { // Switch full to half stepping
+      printer_state.waslasthalfstepping = 1;
+    } else 
+      return printer_state.interval; // Wait an other 50% from last step to make the 100% full
 	} // End cur=0
 	sei();
 
@@ -1159,19 +1199,19 @@ inline long bresenham_step() {
 	cli();
 	if(do_even) {
 		if((cur->flags & FLAG_CHECK_ENDSTOPS) && (curd != 0)) {
-	#if X_MAX_PIN>-1
+	#if X_MAX_PIN>-1 && MAX_HARDWARE_ENDSTOP_X
 			if((curd->dir & 17)==17) if(READ(X_MAX_PIN) != ENDSTOP_X_MAX_INVERTING) {
 				curd->dir&=~16;
 				cur->dir&=~16;
 			}
 	#endif
-	#if Y_MAX_PIN>-1
+	#if Y_MAX_PIN>-1 && MAX_HARDWARE_ENDSTOP_Y
 			if((curd->dir & 34)==34) if(READ(Y_MAX_PIN) != ENDSTOP_Y_MAX_INVERTING) {
 				curd->dir&=~32;
 				cur->dir&=~32;
 			}
 	#endif
-	#if Z_MAX_PIN>-1
+	#if Z_MAX_PIN>-1 && MAX_HARDWARE_ENDSTOP_Z
 			if((curd->dir & 68)==68) if(READ(Z_MAX_PIN)!= ENDSTOP_Z_MAX_INVERTING) {
 				curd->dir&=~64;
 				cur->dir&=~64;
@@ -1514,9 +1554,7 @@ inline long bresenham_step() {
 			if(lines_count==0) UI_STATUS(UI_TEXT_IDLE);
 			interval = printer_state.interval = interval>>1; // 50% of time to next call to do cur=0
 		}
-	#ifdef DEBUG_FREE_MEMORY
-		check_mem();
-	#endif
+	        DEBUG_MEMORY;
 	} // Do even
 	return interval;
 }
@@ -1524,12 +1562,15 @@ inline long bresenham_step() {
 /**
   Moves the stepper motors one step. If the last step is reached, the next movement is started.
   The function must be called from a timer loop. It returns the time for the next call.
+  
+  Normal non delta algorithm
 */
 int lastblk=-1;
 long cur_errupd;
 inline long bresenham_step() {
   if(cur == 0) {
       sei();
+      ANALYZER_ON(ANALYZER_CH0);
       cur = &lines[lines_pos];
       if(cur->flags & FLAG_BLOCKED) { // This step is in computation - shouldn't happen
         if(lastblk!=(int)cur) {
@@ -1542,14 +1583,14 @@ inline long bresenham_step() {
       lastblk = -1;
 #ifdef INCLUDE_DEBUG_NO_MOVE
       if(DEBUG_NO_MOVES) { // simulate a move, but do nothing in reality
-        lines_pos++;
-        if(lines_pos>=MOVE_CACHE_SIZE) lines_pos=0;
+        NEXT_PLANNER_INDEX(lines_pos);
         cur = 0;
         cli();
         --lines_count;
         return 1000;
       }
 #endif
+        ANALYZER_OFF(ANALYZER_CH0);
       if(cur->flags & FLAG_WARMUP) {
           // This is a warmup move to initalize the path planner correctly. Just waste
           // a bit of time to get the planning up to date.
@@ -1558,7 +1599,7 @@ inline long bresenham_step() {
             if(printer_state.filamentRetracted) {
 	#ifdef DEBUG_OPS
               //sei();
-              out.println_P(PSTR("DownW"));
+              OUT_P_LN("DownW");
               cli();
 	#endif
               printer_state.filamentRetracted = false;
@@ -1571,8 +1612,7 @@ inline long bresenham_step() {
           } else if(cur->joinFlags & FLAG_JOIN_START_RETRACT) {
             if(!printer_state.filamentRetracted) {
 	#ifdef DEBUG_OPS
-              //sei();
-              out.println_P(PSTR("UpW"));
+              OUT_P_LN("UpW");
               cli();
 	#endif
               printer_state.filamentRetracted = true;
@@ -1590,17 +1630,24 @@ inline long bresenham_step() {
             cur=0;
             return 2000;
           }
-          lines_pos++;
-          if(lines_pos>=MOVE_CACHE_SIZE) lines_pos=0;
+          NEXT_PLANNER_INDEX(lines_pos);
           long wait = cur->accelerationPrim;
           cur = 0;
+          cli();
           --lines_count;
           return(wait); // waste some time for path optimization to fill up
       } // End if WARMUP
+/*if(DEBUG_ECHO) {
+OUT_P_L_LN("MSteps:",cur->stepsRemaining);
+  //OUT_P_F("Ln:",cur->startSpeed);
+//OUT_P_F_LN(":",cur->endSpeed);
+}*/
       //Only enable axis that are moving. If the axis doesn't need to move then it can stay disabled depending on configuration.
       if(cur->dir & 16) enable_x();
       if(cur->dir & 32) enable_y();
-      if(cur->dir & 64) enable_z();
+      if(cur->dir & 64) {
+        enable_z();
+      }
       if(cur->dir & 128) extruder_enable();
       cur->joinFlags |= FLAG_JOIN_END_FIXED | FLAG_JOIN_START_FIXED; // don't touch this segment any more, just for safety
 #if USE_OPS==1
@@ -1608,7 +1655,7 @@ inline long bresenham_step() {
         if(cur->joinFlags & FLAG_JOIN_START_RETRACT) {
          if(!printer_state.filamentRetracted) {
 	#ifdef DEBUG_OPS
-            out.println_P(PSTR("Up"));
+            OUT_P_LN("Up");
 	#endif
             printer_state.filamentRetracted = true;
             cli();
@@ -1622,7 +1669,7 @@ inline long bresenham_step() {
           if((cur->dir & 136)==136) {
             if(printer_state.filamentRetracted) { // Printmove and filament is still up!
 	#ifdef DEBUG_OPS
-              out.println_P(PSTR("DownA"));
+              OUT_P_LN("DownA");
 	#endif
               printer_state.filamentRetracted = false;
               cli();
@@ -1701,7 +1748,13 @@ inline long bresenham_step() {
      printer_state.extruderStepsNeeded+=tred-printer_state.advance_steps_set;
      printer_state.advance_steps_set = tred;
 #endif
-    return printer_state.interval; // Wait an other 50% fro last step to make the 100% full
+    if(printer_state.waslasthalfstepping && cur->halfstep==0) { // Switch halfstepping -> full stepping
+      printer_state.waslasthalfstepping = 0;
+      return printer_state.interval*3; // Wait an other 150% from last half step to make the 100% full
+    } else if(!printer_state.waslasthalfstepping && cur->halfstep) { // Switch full to half stepping
+      printer_state.waslasthalfstepping = 1;
+    } else 
+      return printer_state.interval; // Wait an other 50% from last step to make the 100% full
   } // End cur=0
   sei();
   /* For halfstepping, we divide the actions into even and odd actions to split
@@ -1719,7 +1772,7 @@ inline long bresenham_step() {
   cli();
   if(do_even) {
 	if(cur->flags & FLAG_CHECK_ENDSTOPS) {
-#if X_MIN_PIN>-1
+#if X_MIN_PIN>-1 && MIN_HARDWARE_ENDSTOP_X
 		if((cur->dir & 17)==16) if(READ(X_MIN_PIN) != ENDSTOP_X_MIN_INVERTING) {
 #if DRIVE_SYSTEM==0
 			cur->dir&=~16;
@@ -1728,7 +1781,7 @@ inline long bresenham_step() {
 #endif
 		}
 #endif
-#if Y_MIN_PIN>-1
+#if Y_MIN_PIN>-1 && MIN_HARDWARE_ENDSTOP_Y
 		if((cur->dir & 34)==32) if(READ(Y_MIN_PIN) != ENDSTOP_Y_MIN_INVERTING) {
 #if DRIVE_SYSTEM==0
 			cur->dir&=~32;
@@ -1737,7 +1790,7 @@ inline long bresenham_step() {
 #endif
 		}
 #endif
-#if X_MAX_PIN>-1
+#if X_MAX_PIN>-1 && MAX_HARDWARE_ENDSTOP_X
 		if((cur->dir & 17)==17) if(READ(X_MAX_PIN) != ENDSTOP_X_MAX_INVERTING) {
 #if DRIVE_SYSTEM==0
 			cur->dir&=~16;
@@ -1746,7 +1799,7 @@ inline long bresenham_step() {
 #endif
 		}
 #endif
-#if Y_MAX_PIN>-1
+#if Y_MAX_PIN>-1 && MAX_HARDWARE_ENDSTOP_Y
 		if((cur->dir & 34)==34) if(READ(Y_MAX_PIN) != ENDSTOP_Y_MAX_INVERTING) {
 #if DRIVE_SYSTEM==0
 			cur->dir&=~32;
@@ -1757,16 +1810,17 @@ inline long bresenham_step() {
 #endif
    }
    // Test Z-Axis every step if necessary, otherwise it could easyly ruin your printer!
-#if Z_MIN_PIN>-1
+#if Z_MIN_PIN>-1 && MIN_HARDWARE_ENDSTOP_Z
    if((cur->dir & 68)==64) if(READ(Z_MIN_PIN) != ENDSTOP_Z_MIN_INVERTING) {cur->dir&=~64;}
 #endif
-#if Z_MAX_PIN>-1
+#if Z_MAX_PIN>-1 && MAX_HARDWARE_ENDSTOP_Z
    if((cur->dir & 68)==68) if(READ(Z_MAX_PIN)!= ENDSTOP_Z_MAX_INVERTING) {cur->dir&=~64;}
 #endif
   }
   byte max_loops = (printer_state.stepper_loops<=cur->stepsRemaining ? printer_state.stepper_loops : cur->stepsRemaining);
   if(cur->stepsRemaining>0) {
    for(byte loop=0;loop<max_loops;loop++) {
+    ANALYZER_ON(ANALYZER_CH1);
     if(loop>0)
 #if STEPPER_HIGH_DELAY>0
       delayMicroseconds(STEPPER_HIGH_DELAY+DOUBLE_STEP_DELAY);
@@ -1792,6 +1846,7 @@ inline long bresenham_step() {
     }
     if(cur->dir & 16) {
       if((cur->error[0] -= cur->delta[0]) < 0) {
+        ANALYZER_ON(ANALYZER_CH2);
         WRITE(X_STEP_PIN,HIGH);
         cur->error[0] += cur_errupd;
 #ifdef DEBUG_STEPCOUNT
@@ -1801,6 +1856,7 @@ inline long bresenham_step() {
     }
     if(cur->dir & 32) {
       if((cur->error[1] -= cur->delta[1]) < 0) {
+        ANALYZER_ON(ANALYZER_CH3);
         WRITE(Y_STEP_PIN,HIGH);
         cur->error[1] += cur_errupd;
 #ifdef DEBUG_STEPCOUNT
@@ -1812,6 +1868,9 @@ inline long bresenham_step() {
       if((cur->error[2] -= cur->delta[2]) < 0) {
         WRITE(Z_STEP_PIN,HIGH);
         cur->error[2] += cur_errupd;
+#ifdef DEBUG_STEPCOUNT
+        cur->totalStepsRemaining--;
+#endif
       }
     }
 #if STEPPER_HIGH_DELAY>0
@@ -1824,7 +1883,9 @@ inline long bresenham_step() {
     WRITE(X_STEP_PIN,LOW);
     WRITE(Y_STEP_PIN,LOW);
     WRITE(Z_STEP_PIN,LOW);
-
+    ANALYZER_OFF(ANALYZER_CH1);
+    ANALYZER_OFF(ANALYZER_CH2);
+    ANALYZER_OFF(ANALYZER_CH3);
   } // for loop
   if(do_odd) {
       sei(); // Allow interrupts for other types, timer1 is still disabled
@@ -1981,7 +2042,7 @@ inline long bresenham_step() {
 #if USE_OPS==1
     if(printer_state.opsMode==2 && (cur->joinFlags & FLAG_JOIN_END_RETRACT) && printer_state.filamentRetracted && cur->stepsRemaining<=cur->opsReverseSteps) {
 #ifdef DEBUG_OPS
-      out.println_long_P(PSTR("DownX"),cur->stepsRemaining);
+      OUT_P_L_LN("DownX",cur->stepsRemaining);
 #endif
       // Point for retraction reversal reached.
       printer_state.filamentRetracted = false;
@@ -1989,7 +2050,7 @@ inline long bresenham_step() {
       printer_state.extruderStepsNeeded+=printer_state.opsPushbackSteps;
 #ifdef DEBUG_OPS
       sei();
-      out.println_long_P(PSTR("N="),printer_state.extruderStepsNeeded);
+      OUT_P_L_LN("N=",printer_state.extruderStepsNeeded);
 #endif
   }
 #endif
@@ -2001,7 +2062,7 @@ inline long bresenham_step() {
     if(cur->stepsRemaining<=0 || (cur->dir & 240)==0) { // line finished
 #ifdef DEBUG_STEPCOUNT
         if(cur->totalStepsRemaining)
-          out.println_long_P(PSTR("Missed steps:"),cur->totalStepsRemaining);
+          OUT_P_L_LN("Missed steps:",cur->totalStepsRemaining);
 #endif
 
 #if USE_OPS==1
@@ -2029,8 +2090,7 @@ inline long bresenham_step() {
      }
 #endif
      cli();
-     lines_pos++;
-     if(lines_pos>=MOVE_CACHE_SIZE) lines_pos=0;
+     NEXT_PLANNER_INDEX(lines_pos);
      cur = 0;
      --lines_count;
        if(DISABLE_X) disable_x();
@@ -2039,9 +2099,7 @@ inline long bresenham_step() {
      if(lines_count==0) UI_STATUS(UI_TEXT_IDLE);
      interval = printer_state.interval = interval>>1; // 50% of time to next call to do cur=0
    }
-#ifdef DEBUG_FREE_MEMORY
-    check_mem();
-#endif
+   DEBUG_MEMORY;
   } // Do even
   return interval;
 }
@@ -2199,9 +2257,7 @@ ISR(TIMER1_COMPA_vect)
     stepperWait = 0; // Importent becaus of optimization in asm at begin
     OCR1A = 65500; // Wait for next move
   }
-#ifdef DEBUG_FREE_MEMORY
-  check_mem();
-#endif
+  DEBUG_MEMORY;
   insideTimer1=0;
 }
 

@@ -6,7 +6,7 @@
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
 
-    Foobar is distributed in the hope that it will be useful,
+    Repetier-Firmware is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
@@ -167,6 +167,8 @@
 #define UI_TEXT_LEVEL             "Level delta"
 #define UI_TEXT_EXTR_WAIT_RETRACT_TEMP "Wait Temp. %XT\002C"
 #define UI_TEXT_EXTR_WAIT_RETRACT_UNITS "Wait Units: %XU mm"
+#define UI_TEXT_SD_REMOVED       "SD Card removed"
+#define UI_TEXT_SD_INSERTED      "SD Card inserted"
 
 // *************** german translation ****************
 
@@ -317,6 +319,8 @@
 #define UI_TEXT_LEVEL			  "Level delta"
 #define UI_TEXT_EXTR_WAIT_RETRACT_TEMP  "Wait Temp.%XT\002C"
 #define UI_TEXT_EXTR_WAIT_RETRACT_UNITS "Wait Units:%XUmm"
+#define UI_TEXT_SD_REMOVED       "Karte entfernt"
+#define UI_TEXT_SD_INSERTED      "Karte eingelegt"
 
 #endif
 

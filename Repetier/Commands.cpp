@@ -6,7 +6,7 @@
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
 
-    Foobar is distributed in the hope that it will be useful,
+    Repetier-Firmware is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
@@ -20,7 +20,9 @@
 */
 
 #include "Reptier.h"
+#if EEPROM_MODE != 0
 #include "Eeprom.h"
+#endif
 #include "pins_arduino.h"
 #include "ui.h"
 
@@ -105,7 +107,7 @@ void delta_move_to_top_endstops(float feedrate) {
 void home_axis(bool xaxis,bool yaxis,bool zaxis) {
   long steps;
   bool homeallaxis = (xaxis && yaxis && zaxis) || (!xaxis && !yaxis && !zaxis);
-  if (X_MAX_PIN > -1 && Y_MAX_PIN > -1 && Z_MAX_PIN > -1) {
+  if (X_MAX_PIN > -1 && Y_MAX_PIN > -1 && Z_MAX_PIN > -1 && MAX_HARDWARE_ENDSTOP_X & MAX_HARDWARE_ENDSTOP_Y && MAX_HARDWARE_ENDSTOP_Z) {
     UI_STATUS_UPD(UI_TEXT_HOME_DELTA);
     // Homing Z axis means that you must home X and Y
     if (homeallaxis || zaxis) {
@@ -130,7 +132,7 @@ void home_axis(bool xaxis,bool yaxis,bool zaxis) {
 void home_axis(bool xaxis,bool yaxis,bool zaxis) {
   long steps;
   if(xaxis) {
-    if ((X_MIN_PIN > -1 && X_HOME_DIR==-1) || (X_MAX_PIN > -1 && X_HOME_DIR==1)){
+    if ((MIN_HARDWARE_ENDSTOP_X && X_MIN_PIN > -1 && X_HOME_DIR==-1) || (MAX_HARDWARE_ENDSTOP_X && X_MAX_PIN > -1 && X_HOME_DIR==1)){
       UI_STATUS_UPD(UI_TEXT_HOME_X);
       steps = (printer_state.xMaxSteps-printer_state.xMinSteps) * X_HOME_DIR;         
       printer_state.currentPositionSteps[0] = -steps;
@@ -146,7 +148,7 @@ void home_axis(bool xaxis,bool yaxis,bool zaxis) {
     }
   }        
   if(yaxis) {
-    if ((Y_MIN_PIN > -1 && Y_HOME_DIR==-1) || (Y_MAX_PIN > -1 && Y_HOME_DIR==1)){
+    if ((MIN_HARDWARE_ENDSTOP_Y && Y_MIN_PIN > -1 && Y_HOME_DIR==-1) || (MAX_HARDWARE_ENDSTOP_Y && Y_MAX_PIN > -1 && Y_HOME_DIR==1)){
       UI_STATUS_UPD(UI_TEXT_HOME_Y);
       steps = (printer_state.yMaxSteps-printer_state.yMinSteps) * Y_HOME_DIR;         
       printer_state.currentPositionSteps[1] = -steps;
@@ -162,7 +164,7 @@ void home_axis(bool xaxis,bool yaxis,bool zaxis) {
     }
   }        
   if(zaxis) {
-    if ((Z_MIN_PIN > -1 && Z_HOME_DIR==-1) || (Z_MAX_PIN > -1 && Z_HOME_DIR==1)){
+    if ((MIN_HARDWARE_ENDSTOP_Z && Z_MIN_PIN > -1 && Z_HOME_DIR==-1) || (MAX_HARDWARE_ENDSTOP_Z && Z_MAX_PIN > -1 && Z_HOME_DIR==1)){
       UI_STATUS_UPD(UI_TEXT_HOME_Z);
       steps = (printer_state.zMaxSteps-printer_state.zMinSteps) * Z_HOME_DIR;         
       printer_state.currentPositionSteps[2] = -steps;
@@ -304,6 +306,124 @@ void process_command(GCode *com)
           queue_move(ALWAYS_CHECK_ENDSTOPS,true);
 #endif
         break;
+#if ARC_SUPPORT
+      case 2: // CW Arc
+      case 3: // CCW Arc MOTION_MODE_CW_ARC: case MOTION_MODE_CCW_ARC:
+      {
+        if(!get_coordinates(com)) break; // For X Y Z E F
+        float offset[2] = {(GCODE_HAS_I(com)?com->I:0),(GCODE_HAS_J(com)?com->J:0)};
+        if(unit_inches) {
+          offset[0]*=25.4;
+          offset[1]*=25.4;
+        }
+        float position[2] = {printer_state.currentPositionSteps[0]*inv_axis_steps_per_unit[0],printer_state.currentPositionSteps[1]*inv_axis_steps_per_unit[1]};
+        float target[2] = {printer_state.destinationSteps[0]*inv_axis_steps_per_unit[0],printer_state.destinationSteps[1]*inv_axis_steps_per_unit[1]};    
+        float r;
+        if (GCODE_HAS_R(com)) {
+        /* 
+          We need to calculate the center of the circle that has the designated radius and passes
+          through both the current position and the target position. This method calculates the following
+          set of equations where [x,y] is the vector from current to target position, d == magnitude of 
+          that vector, h == hypotenuse of the triangle formed by the radius of the circle, the distance to
+          the center of the travel vector. A vector perpendicular to the travel vector [-y,x] is scaled to the 
+          length of h [-y/d*h, x/d*h] and added to the center of the travel vector [x/2,y/2] to form the new point 
+          [i,j] at [x/2-y/d*h, y/2+x/d*h] which will be the center of our arc.
+          
+          d^2 == x^2 + y^2
+          h^2 == r^2 - (d/2)^2
+          i == x/2 - y/d*h
+          j == y/2 + x/d*h
+          
+                                                               O <- [i,j]
+                                                            -  |
+                                                  r      -     |
+                                                      -        |
+                                                   -           | h
+                                                -              |
+                                  [0,0] ->  C -----------------+--------------- T  <- [x,y]
+                                            | <------ d/2 ---->|
+                    
+          C - Current position
+          T - Target position
+          O - center of circle that pass through both C and T
+          d - distance from C to T
+          r - designated radius
+          h - distance from center of CT to O
+          
+          Expanding the equations:
+
+          d -> sqrt(x^2 + y^2)
+          h -> sqrt(4 * r^2 - x^2 - y^2)/2
+          i -> (x - (y * sqrt(4 * r^2 - x^2 - y^2)) / sqrt(x^2 + y^2)) / 2 
+          j -> (y + (x * sqrt(4 * r^2 - x^2 - y^2)) / sqrt(x^2 + y^2)) / 2
+         
+          Which can be written:
+          
+          i -> (x - (y * sqrt(4 * r^2 - x^2 - y^2))/sqrt(x^2 + y^2))/2
+          j -> (y + (x * sqrt(4 * r^2 - x^2 - y^2))/sqrt(x^2 + y^2))/2
+          
+          Which we for size and speed reasons optimize to:
+
+          h_x2_div_d = sqrt(4 * r^2 - x^2 - y^2)/sqrt(x^2 + y^2)
+          i = (x - (y * h_x2_div_d))/2
+          j = (y + (x * h_x2_div_d))/2
+          
+        */
+        r = com->R;
+        if(unit_inches) r*=25.4;
+        // Calculate the change in position along each selected axis
+        double x = target[0]-position[0];
+        double y = target[1]-position[1];
+        
+        double h_x2_div_d = -sqrt(4 * r*r - x*x - y*y)/hypot(x,y); // == -(h * 2 / d)
+        // If r is smaller than d, the arc is now traversing the complex plane beyond the reach of any
+        // real CNC, and thus - for practical reasons - we will terminate promptly:
+        if(isnan(h_x2_div_d)) { OUT_P_LN("error: Invalid arc"); break; }
+        // Invert the sign of h_x2_div_d if the circle is counter clockwise (see sketch below)
+        if (com->G==3) { h_x2_div_d = -h_x2_div_d; }
+        
+        /* The counter clockwise circle lies to the left of the target direction. When offset is positive,
+           the left hand circle will be generated - when it is negative the right hand circle is generated.
+           
+           
+                                                         T  <-- Target position
+                                                         
+                                                         ^ 
+              Clockwise circles with this center         |          Clockwise circles with this center will have
+              will have > 180 deg of angular travel      |          < 180 deg of angular travel, which is a good thing!
+                                               \         |          /   
+  center of arc when h_x2_div_d is positive ->  x <----- | -----> x <- center of arc when h_x2_div_d is negative
+                                                         |
+                                                         |
+                                                         
+                                                         C  <-- Current position                                 */
+                
+
+        // Negative R is g-code-alese for "I want a circle with more than 180 degrees of travel" (go figure!), 
+        // even though it is advised against ever generating such circles in a single line of g-code. By 
+        // inverting the sign of h_x2_div_d the center of the circles is placed on the opposite side of the line of
+        // travel and thus we get the unadvisably long arcs as prescribed.
+        if (r < 0) { 
+            h_x2_div_d = -h_x2_div_d; 
+            r = -r; // Finished with r. Set to positive for mc_arc
+        }        
+        // Complete the operation by calculating the actual center of the arc
+        offset[0] = 0.5*(x-(y*h_x2_div_d));
+        offset[1] = 0.5*(y+(x*h_x2_div_d));
+
+      } else { // Offset mode specific computations
+        r = hypot(offset[0], offset[1]); // Compute arc radius for mc_arc
+      }
+      
+      // Set clockwise/counter-clockwise sign for mc_arc computations
+      uint8_t isclockwise = com->G == 2;
+
+      // Trace the arc
+      mc_arc(position, target, offset,r, isclockwise);
+        
+      break;
+      }
+#endif
       case 4: // G4 dwell
         wait_until_end_of_move();
         codenum = 0;
@@ -348,7 +468,7 @@ void process_command(GCode *com)
   else if(GCODE_HAS_M(com))  { // Process M Code
     
     switch( com->M ) {
-#ifdef SDSUPPORT
+#if SDSUPPORT
         
       case 20: // M20 - list SD card
         sd.ls();
@@ -485,13 +605,13 @@ void process_command(GCode *com)
         if(DEBUG_DRYRUN) break;
         UI_STATUS_UPD(UI_TEXT_HEATING_BED);
         wait_until_end_of_move();
-#ifdef HEATED_HEATED_BED
+#if HAVE_HEATED_BED
         if (GCODE_HAS_S(com)) heated_bed_set_temperature(com->S);
 #if defined(SKIP_M190_IF_WITHIN) && SKIP_M190_IF_WITHIN>0
-        if(abs(heatedBedController->currentTemperatureC-heatedBed->targetTemperatureC)<SKIP_M190_IF_WITHIN) break;
+        if(abs(heatedBedController.currentTemperatureC-heatedBedController.targetTemperatureC)<SKIP_M190_IF_WITHIN) break;
 #endif
         codenum = millis(); 
-        while(heatedBedController->currentTemperatureC+0.5<heatedBed->targetTemperatureC) {
+        while(heatedBedController.currentTemperatureC+0.5<heatedBedController.targetTemperatureC) {
           if( (millis()-codenum) > 1000 ) { //Print Temp Reading every 1 second while heating up.
             print_temperatures();
             codenum = millis(); 
@@ -572,12 +692,32 @@ void process_command(GCode *com)
 #endif
         }   
         break;
-      case 115: // M115
+      case 115: {// M115
 #if DRIVE_SYSTEM==3
         out.println_P(PSTR("FIRMWARE_NAME:Repetier_" REPETIER_VERSION " FIRMWARE_URL:https://github.com/repetier/Repetier-Firmware/ PROTOCOL_VERSION:1.0 MACHINE_TYPE:Rostock EXTRUDER_COUNT:1 REPETIER_PROTOCOL:2"));
 #else
         out.println_P(PSTR("FIRMWARE_NAME:Repetier_" REPETIER_VERSION " FIRMWARE_URL:https://github.com/repetier/Repetier-Firmware/ PROTOCOL_VERSION:1.0 MACHINE_TYPE:Mendel EXTRUDER_COUNT:1 REPETIER_PROTOCOL:2"));
 #endif
+#if EEPROM_MODE!=0
+        float dist = printer_state.filamentPrinted*0.001+epr_get_float(EPR_PRINTING_DISTANCE);
+        OUT_P_FX("Printed filament:",dist,2);
+        OUT_P_LN(" mm");
+        bool alloff = true;
+        for(byte i=0;i<NUM_EXTRUDER;i++)
+          if(tempController[i]->targetTemperatureC>15) alloff = false;
+
+        long seconds = (alloff ? 0 : (millis()-printer_state.msecondsPrinting)/1000)+epr_get_long(EPR_PRINTING_TIME);
+        long tmp = seconds/86400;
+        seconds-=tmp*86400;
+        OUT_P_L("Printing time:",tmp);
+        tmp=seconds/3600;
+        OUT_P_L(" days ",tmp);
+        seconds-=tmp*3600;
+        tmp = seconds/60;
+        OUT_P_L(" hours ",tmp);
+        OUT_P_LN(" min");
+#endif
+       }
         break;
       case 114: // M114
         printPosition();
@@ -589,27 +729,27 @@ void process_command(GCode *com)
         break;
       case 119: // M119
         wait_until_end_of_move();
-      	#if (X_MIN_PIN > -1)
+      	#if (X_MIN_PIN > -1) && MIN_HARDWARE_ENDSTOP_X
       	out.print_P(PSTR("x_min:"));
         out.print_P((READ(X_MIN_PIN)^ENDSTOP_X_MIN_INVERTING)?PSTR("H "):PSTR("L "));
       	#endif
-      	#if (X_MAX_PIN > -1)
+      	#if (X_MAX_PIN > -1) && MAX_HARDWARE_ENDSTOP_X
       	out.print_P(PSTR("x_max:"));
         out.print_P((READ(X_MAX_PIN)^ENDSTOP_X_MAX_INVERTING)?PSTR("H "):PSTR("L "));
       	#endif
-      	#if (Y_MIN_PIN > -1)
+      	#if (Y_MIN_PIN > -1) && MIN_HARDWARE_ENDSTOP_Y
       	out.print_P(PSTR("y_min:"));
         out.print_P((READ(Y_MIN_PIN)^ENDSTOP_Y_MIN_INVERTING)?PSTR("H "):PSTR("L "));
       	#endif
-      	#if (Y_MAX_PIN > -1)
+      	#if (Y_MAX_PIN > -1) && MAX_HARDWARE_ENDSTOP_Y
       	out.print_P(PSTR("y_max:"));
         out.print_P((READ(Y_MAX_PIN)^ENDSTOP_Y_MAX_INVERTING)?PSTR("H "):PSTR("L "));
       	#endif
-      	#if (Z_MIN_PIN > -1)
+      	#if (Z_MIN_PIN > -1) && MIN_HARDWARE_ENDSTOP_Z
       	out.print_P(PSTR("z_min:"));
         out.print_P((READ(Z_MIN_PIN)^ENDSTOP_Z_MIN_INVERTING)?PSTR("H "):PSTR("L "));
       	#endif
-      	#if (Z_MAX_PIN > -1)
+      	#if (Z_MAX_PIN > -1) && MAX_HARDWARE_ENDSTOP_Z
       	out.print_P(PSTR("z_max:"));
         out.print_P((READ(Z_MAX_PIN)^ENDSTOP_Z_MAX_INVERTING)?PSTR("H "):PSTR("L "));
       	#endif
@@ -641,14 +781,33 @@ void process_command(GCode *com)
  #endif
         }
         break;
+      case 204:
+        {
+          TemperatureController *temp = &current_extruder->tempControl;
+          if(GCODE_HAS_S(com)) {
+            if(com->S<0) break;
+            if(com->S<NUM_EXTRUDER) temp = &extruder[com->S].tempControl; 
+            else temp = &heatedBedController;            
+          }
+          if(GCODE_HAS_X(com)) temp->pidPGain = com->X;
+          if(GCODE_HAS_Y(com)) temp->pidIGain = com->Y;
+          if(GCODE_HAS_Z(com)) temp->pidDGain = com->Z;
+          updateTempControlVars(temp);
+        }
+        break;
+	  case 503:
       case 205: // M205 Show EEPROM settings
+#if EEPROM_MODE!=0
         epr_output_settings();
+#else
+         OUT_P_LN("Error: No EEPROM support compiled.");
+#endif
         break;
       case 206: // M206 T[type] P[pos] [Sint(long] [Xfloat]  Set eeprom value
 #if EEPROM_MODE!=0
           epr_update(com);
 #else
-          out.println_P(PSTR("Error: No EEPROM support compiled."));
+          OUT_P_LN("Error: No EEPROM support compiled.");
 #endif
         break;
       case 207: // M207 X<XY jerk> Z<Z Jerk>
@@ -747,6 +906,9 @@ void process_command(GCode *com)
         update_extruder_flags();
         break;
 #endif
+    case 400: // Finish all moves
+      wait_until_end_of_move();
+      break;
     case 908: // Control digital trimpot directly.
     {
 #if defined(DIGIPOTSS_PIN) && DIGIPOTSS_PIN > -1
@@ -756,7 +918,36 @@ void process_command(GCode *com)
 #endif
     }
     break;
-    
+	case 500:
+	{
+	#if EEPROM_MODE!=0
+		epr_data_to_eeprom(false);
+        OUT_P_LN("Configuration stored to EEPROM.");
+	#else
+        OUT_P_LN("Error: No EEPROM support compiled.");
+	#endif
+	}
+	break;
+	case 501:
+	{
+	#if EEPROM_MODE!=0
+		epr_eeprom_to_data();
+        OUT_P_LN("Configuration loaded from EEPROM.");
+	#else
+          OUT_P_LN("Error: No EEPROM support compiled.");
+	#endif
+	}
+	break;
+	case 502:
+	{
+	#if EEPROM_MODE!=0
+		epr_eeprom_reset();
+        OUT_P_LN("Configuration reset to defaults.");
+	#else
+          OUT_P_LN("Error: No EEPROM support compiled.");
+	#endif
+	}
+	break;
     case 350: // Set microstepping mode. Warning: Steps per unit remains unchanged. S code sets stepping mode for all drivers.
     {
       OUT_P_LN("Set Microstepping");
@@ -801,6 +992,18 @@ void process_command(GCode *com)
 			break;
 #endif
 #endif
+    case 401:
+      OUT_P_I_LN("Linespos:",lines_pos);
+      OUT_P_I_LN("Linescount:",lines_count);
+      OUT_P_L_LN("baud:",baudrate);
+      lines_count = 0;
+      break;
+    case 402:
+      extruder_select(current_extruder->id);
+      break;
+    case 403:
+      update_ramps_parameter();
+      break;
     }
   } else if(GCODE_HAS_T(com))  { // Process T code
     wait_until_end_of_move();

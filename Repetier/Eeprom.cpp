@@ -6,7 +6,7 @@
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
 
-    Foobar is distributed in the hope that it will be useful,
+    Repetier-Firmware is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
@@ -22,9 +22,9 @@
 */
 
 #include "Reptier.h"
-#include "Eeprom.h"
 
 #if EEPROM_MODE!=0
+#include "Eeprom.h"
 extern void epr_eeprom_to_data();
 
 byte epr_compute_checksum() {
@@ -37,20 +37,7 @@ byte epr_compute_checksum() {
   return checksum;
 }
 
-inline byte epr_get_byte(uint pos) {
-   return eeprom_read_byte ((unsigned char *)(EEPROM_OFFSET+pos));
-}
-inline int epr_get_int(uint pos) {
-  return eeprom_read_word((unsigned int *)(EEPROM_OFFSET+pos));
-}
-inline long epr_get_long(uint pos) {
-  return eeprom_read_dword((unsigned long*)(EEPROM_OFFSET+pos));
-}
-inline float epr_get_float(uint pos) {
-  float v;
-  eeprom_read_block(&v,(void *)(EEPROM_OFFSET+pos),4); // newer gcc have eeprom_read_block but not arduino 22
-  return v;
-}
+
 
 inline void epr_set_byte(uint pos,byte value) {
   eeprom_write_byte((unsigned char *)(EEPROM_OFFSET+pos), value);
@@ -116,6 +103,123 @@ void epr_update(GCode *com) {
   if(newcheck!=epr_get_byte(EPR_INTEGRITY_BYTE))
     epr_set_byte(EPR_INTEGRITY_BYTE,newcheck);
   epr_eeprom_to_data();
+}
+
+/** \brief Copy data from EEPROM to variables.
+*/
+void epr_eeprom_reset() {
+  byte version = EEPROM_PROTOCOL_VERSION;
+  baudrate = BAUDRATE;
+  max_inactive_time = MAX_INACTIVE_TIME*1000L;
+  stepper_inactive_time = STEPPER_INACTIVE_TIME*1000L;
+  axis_steps_per_unit[0] = XAXIS_STEPS_PER_MM;
+  axis_steps_per_unit[1] = YAXIS_STEPS_PER_MM; 
+  axis_steps_per_unit[2] = ZAXIS_STEPS_PER_MM;
+  axis_steps_per_unit[3] = 1;
+  max_feedrate[0] = MAX_FEEDRATE_X;
+  max_feedrate[1] = MAX_FEEDRATE_Y;
+  max_feedrate[2] = MAX_FEEDRATE_Z;
+  homing_feedrate[0] = HOMING_FEEDRATE_X;
+  homing_feedrate[1] = HOMING_FEEDRATE_Y;
+  homing_feedrate[2] = HOMING_FEEDRATE_Z;
+  printer_state.maxJerk = MAX_JERK;
+  printer_state.maxZJerk = MAX_ZJERK;
+#ifdef RAMP_ACCELERATION
+  max_acceleration_units_per_sq_second[0] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_X;
+  max_acceleration_units_per_sq_second[1] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_Y;
+  max_acceleration_units_per_sq_second[2] = MAX_ACCELERATION_UNITS_PER_SQ_SECOND_Z;
+  max_travel_acceleration_units_per_sq_second[0] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_X;
+  max_travel_acceleration_units_per_sq_second[1] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_X;
+  max_travel_acceleration_units_per_sq_second[2] = MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_X;
+#endif
+#if USE_OPS==1
+  printer_state.opsMode = OPS_MODE;
+  printer_state.opsMinDistance = OPS_MIN_DISTANCE;
+  printer_state.opsRetractDistance = OPS_RETRACT_DISTANCE;
+  printer_state.opsRetractBacklash = OPS_RETRACT_BACKLASH;
+  printer_state.opsMoveAfter = 0;
+#endif
+#if HAVE_HEATED_BED
+  heatedBedController.heatManager= HEATED_BED_HEAT_MANAGER;
+#ifdef TEMP_PID
+  heatedBedController.pidDriveMax = HEATED_BED_PID_INTEGRAL_DRIVE_MAX;
+  heatedBedController.pidDriveMin = HEATED_BED_PID_INTEGRAL_DRIVE_MIN;
+  heatedBedController.pidPGain = HEATED_BED_PID_PGAIN;
+  heatedBedController.pidIGain = HEATED_BED_PID_IGAIN;
+  heatedBedController.pidDGain = HEATED_BED_PID_DGAIN;
+  heatedBedController.pidMax = HEATED_BED_PID_MAX;
+#endif
+#endif
+  printer_state.xLength = X_MAX_LENGTH;
+  printer_state.yLength = Y_MAX_LENGTH;
+  printer_state.zLength = Z_MAX_LENGTH;
+  printer_state.xMin = X_MIN_POS;
+  printer_state.yMin = Y_MIN_POS;
+  printer_state.zMin = Z_MIN_POS;
+#if ENABLE_BACKLASH_COMPENSATION
+  printer_state.backlashX = X_BACKLASH;
+  printer_state.backlashY = Y_BACKLASH;
+  printer_state.backlashZ = Z_BACKLASH;
+#endif
+  Extruder *e = &extruder[0];
+  e->stepsPerMM = EXT0_STEPS_PER_MM;
+  e->maxFeedrate = EXT0_MAX_FEEDRATE;
+  e->maxStartFeedrate = EXT0_MAX_START_FEEDRATE;
+  e->maxAcceleration = EXT0_MAX_ACCELERATION;
+  e->tempControl.heatManager = EXT0_HEAT_MANAGER;
+#ifdef TEMP_PID
+  e->tempControl.pidDriveMax = EXT0_PID_INTEGRAL_DRIVE_MAX;
+  e->tempControl.pidDriveMin = EXT0_PID_INTEGRAL_DRIVE_MIN;
+  e->tempControl.pidPGain = EXT0_PID_P;
+  e->tempControl.pidIGain = EXT0_PID_I;
+  e->tempControl.pidDGain = EXT0_PID_D;
+  e->tempControl.pidMax = EXT0_PID_MAX;
+#endif
+  e->yOffset = EXT0_Y_OFFSET;
+  e->xOffset = EXT0_X_OFFSET;
+  e->watchPeriod = EXT0_WATCHPERIOD;
+#if RETRACT_DURING_HEATUP
+  e->waitRetractTemperature = EXT0_WAIT_RETRACT_TEMP;
+  e->waitRetractUnits = EXT0_WAIT_RETRACT_UNITS;
+#endif
+#ifdef USE_ADVANCE
+#ifdef ENABLE_QUADRATIC_ADVANCE
+  e->advanceK = EXT0_ADVANCE_K;
+#endif
+  e->advanceL = EXT0_ADVANCE_L;
+#endif
+#if NUM_EXTRUDER>1
+  e = &extruder[1];
+  e->stepsPerMM = EXT1_STEPS_PER_MM;
+  e->maxFeedrate = EXT1_MAX_FEEDRATE;
+  e->maxStartFeedrate = EXT1_MAX_START_FEEDRATE;
+  e->maxAcceleration = EXT1_MAX_ACCELERATION;
+  e->tempControl.heatManager = EXT1_HEAT_MANAGER;
+#ifdef TEMP_PID
+  e->tempControl.pidDriveMax = EXT1_PID_INTEGRAL_DRIVE_MAX;
+  e->tempControl.pidDriveMin = EXT1_PID_INTEGRAL_DRIVE_MIN;
+  e->tempControl.pidPGain = EXT1_PID_P;
+  e->tempControl.pidIGain = EXT1_PID_I;
+  e->tempControl.pidDGain = EXT1_PID_D;
+  e->tempControl.pidMax = EXT1_PID_MAX;
+#endif
+  e->yOffset = EXT1_Y_OFFSET;
+  e->xOffset = EXT1_X_OFFSET;
+  e->watchPeriod = EXT1_WATCHPERIOD;
+#if RETRACT_DURING_HEATUP
+  e->waitRetractTemperature = EXT1_WAIT_RETRACT_TEMP;
+  e->waitRetractUnits = EXT1_WAIT_RETRACT_UNITS;
+#endif
+#ifdef USE_ADVANCE
+#ifdef ENABLE_QUADRATIC_ADVANCE
+  e->advanceK = EXT1_ADVANCE_K;
+#endif
+  e->advanceL = EXT1_ADVANCE_L;
+#endif
+#endif
+  extruder_select(current_extruder->id);
+  update_ramps_parameter();
+  initHeatedBed();
 }
 
 /** \brief Moves current settings to EEPROM.
@@ -352,7 +456,7 @@ void epr_init() {
     epr_eeprom_to_data();
   } else {
     epr_set_byte(EPR_MAGIC_BYTE,EEPROM_MODE); // Make datachange permanent
-    epr_data_to_eeprom(storedcheck==check);
+    epr_data_to_eeprom(storedcheck!=check);
   }
 #endif
 }
@@ -361,7 +465,7 @@ void epr_init() {
 void epr_update_usage() {
 #if EEPROM_MODE!=0
   if(printer_state.filamentPrinted==0) return; // No miles only enabled
-  unsigned long seconds = (millis()-printer_state.msecondsPrinting);
+  unsigned long seconds = (millis()-printer_state.msecondsPrinting)/1000;
   seconds += epr_get_long(EPR_PRINTING_TIME);
   epr_set_long(EPR_PRINTING_TIME,seconds);
   epr_set_float(EPR_PRINTING_DISTANCE,epr_get_float(EPR_PRINTING_DISTANCE)+printer_state.filamentPrinted*0.001);
@@ -467,7 +571,7 @@ void epr_output_settings() {
     epr_out_long(o+EPR_EXTRUDER_Y_OFFSET,PSTR("Y-offset [steps]"));
     epr_out_int(o+EPR_EXTRUDER_WATCH_PERIOD,PSTR("Temp. stabilize time [s]"));
     epr_out_int(o+EPR_EXTRUDER_WAIT_RETRACT_TEMP,PSTR("Temp. to retract when heating [C]"));
-    epr_out_int(o+EPR_EXTRUDER_WAIT_RETRACT_UNITS,PSTR("Units to retract when heating [mm]"));
+    epr_out_int(o+EPR_EXTRUDER_WAIT_RETRACT_UNITS,PSTR("Distance to retract when heating [mm]"));
 #ifdef USE_ADVANCE
 #ifdef ENABLE_QUADRATIC_ADVANCE
     epr_out_float(o+EPR_EXTRUDER_ADVANCE_K,PSTR("Advance K [0=off]"));

@@ -6,7 +6,7 @@
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
 
-    Foobar is distributed in the hope that it will be useful,
+    Repetier-Firmware is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
@@ -229,7 +229,9 @@ typedef struct {
 #error "This library requires AVR-GCC 3.4 or later, update to newer AVR-GCC compiler !"
 #endif
 
+#if MOTHERBOARD != 401
 #include <avr/io.h>
+#endif
 
 /** defines the data direction (reading from I2C device) in i2c_start(),i2c_rep_start() */
 #define I2C_READ    1
@@ -446,7 +448,13 @@ extern UIDisplay uid;
 #define COMPILE_I2C_DRIVER
 #endif
 
-
+#ifndef UI_TEMP_PRECISION
+#if UI_COLS>16
+#define UI_TEMP_PRECISION 1
+#else
+#define UI_TEMP_PRECISION 0
+#endif
+#endif
 
 #define UI_INITIALIZE uid.initialize();
 #define UI_FAST if(pwm_count & 4) {uid.fastAction();}

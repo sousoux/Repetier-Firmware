@@ -6,7 +6,7 @@
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
 
-    Foobar is distributed in the hope that it will be useful,
+    Repetier-Firmware is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
@@ -59,6 +59,7 @@ To override EEPROM settings with config settings, set EEPROM_MODE 0
 // Printrboard (at90usb)      = 9 // requires Teensyduino
 // MegaTronics                = 70
 // Rambo                      = 301
+// Arduino Due				  = 401
 
 #define MOTHERBOARD 33
 #include "pins.h"
@@ -175,7 +176,7 @@ Mega.
 #define EXT0_MAX_START_FEEDRATE 10
 // Acceleration in mm/s^2
 //  Overridden if EEPROM activated.
-#define EXT0_MAX_ACCELERATION 3000
+#define EXT0_MAX_ACCELERATION 1000
 /** Type of heat manager for this extruder. 
 - 0 = Simply switch on/off if temperature is reached. Works always.
 - 1 = PID Temperature control. Is better but needs good PID values. Defaults are a good start for most extruder.
@@ -333,7 +334,7 @@ need to increase this value. For one 6.8 Ohm heater 10 is ok. With two 6.8 Ohm h
 */
 #define PID_CONTROL_RANGE 15
 
-/** Slip wait, if the extruder temperature is already within x degrees. Only fixed numbers, 0 = off */
+/** Skip wait, if the extruder temperature is already within x degrees. Only fixed numbers, 0 = off */
 #define SKIP_M109_IF_WITHIN 2
 
 /** Number of entries in the user thermistortable 0. Set to 0 to disable it. */
@@ -476,7 +477,7 @@ Heat manager for heated bed:
 1 = PID controlled
 2 = Bang Bang, limited check every HEATED_BED_SET_INTERVAL. Use this with relais driven beds to save life
 */
-#define HEATED_BED_HEAT_MANAGER 2
+#define HEATED_BED_HEAT_MANAGER 0
 /** \brief The maximum value, I-gain can contribute to the output. 
 
 A good value is slightly higher then the output needed for your temperature.
@@ -549,6 +550,15 @@ on this endstop.
 #define ENDSTOP_Y_MAX_INVERTING false
 #define ENDSTOP_Z_MAX_INVERTING false
 
+// Set the values true where you have a hardware endstop. The Pin numbe ris taken from pins.h.
+
+#define MIN_HARDWARE_ENDSTOP_X false
+#define MIN_HARDWARE_ENDSTOP_Y false
+#define MIN_HARDWARE_ENDSTOP_Z false
+#define MAX_HARDWARE_ENDSTOP_X true
+#define MAX_HARDWARE_ENDSTOP_Y true
+#define MAX_HARDWARE_ENDSTOP_Z true
+
 //If your axes are only moving in one direction, make sure the endstops are connected properly.
 //If your axes move in one direction ONLY when the endstops are triggered, set ENDSTOPS_INVERTING to true here
 
@@ -589,7 +599,7 @@ on this endstop.
 //If true, axis won't move to coordinates greater than the defined lengths below.
 #define max_software_endstop_x false
 #define max_software_endstop_y false
-#define max_software_endstop_z fasle
+#define max_software_endstop_z false
 
 // If during homing the endstop is reached, ho many mm should the printer move back for the second try
 #define ENDSTOP_X_BACK_MOVE 5
@@ -687,13 +697,20 @@ on this endstop.
     The axis order in all axis related arrays is X, Y, Z
      Overridden if EEPROM activated.
     */
-#define MAX_FEEDRATE {200, 200, 200}
+#define MAX_FEEDRATE_X 600
+#define MAX_FEEDRATE_Y 600
+#define MAX_FEEDRATE_Z 600
+#define MAX_FEEDRATE {MAX_FEEDRATE_X, MAX_FEEDRATE_Y, MAX_FEEDRATE_Z}
+
 /** Speed in mm/min for finding the home position.  Overridden if EEPROM activated. */
-#define HOMING_FEEDRATE {80,80,30}
+#define HOMING_FEEDRATE_X 100
+#define HOMING_FEEDRATE_Y 100
+#define HOMING_FEEDRATE_Z 100
+#define HOMING_FEEDRATE {HOMING_FEEDRATE_X, HOMING_FEEDRATE_Y, HOMING_FEEDRATE_Z}
 
 /* If you have a backlash in both z-directions, you can use this. For most printer, the bed will be pushed down by it's
 own weight, so this is nearly never needed. */
-#define ENABLE_BACKLASH_COMPENSATION true
+#define ENABLE_BACKLASH_COMPENSATION false
 #define Z_BACKLASH 0
 #define X_BACKLASH 0
 #define Y_BACKLASH 0
@@ -738,9 +755,17 @@ If the interval at full speed is below this value, smoothing is disabled for tha
 /** \brief X, Y, Z max acceleration in mm/s^2 for printing moves or retracts. Make sure your printer can go that high! 
  Overridden if EEPROM activated.
 */
-#define MAX_ACCELERATION_UNITS_PER_SQ_SECOND {1500,1500,1500} 
+#define MAX_ACCELERATION_UNITS_PER_SQ_SECOND_X 1500
+#define MAX_ACCELERATION_UNITS_PER_SQ_SECOND_Y 1500
+#define MAX_ACCELERATION_UNITS_PER_SQ_SECOND_Z 1500
+
+#define MAX_ACCELERATION_UNITS_PER_SQ_SECOND {MAX_ACCELERATION_UNITS_PER_SQ_SECOND_X,MAX_ACCELERATION_UNITS_PER_SQ_SECOND_Y,MAX_ACCELERATION_UNITS_PER_SQ_SECOND_Z} 
 /** \brief X, Y, Z max acceleration in mm/s^2 for travel moves.  Overridden if EEPROM activated.*/
-#define MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND {3000,3000,3000}
+#define MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_X 3000
+#define MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_Y 3000
+#define MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_Z 3000
+
+#define MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND {MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_X,MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_Y,MAX_TRAVEL_ACCELERATION_UNITS_PER_SQ_SECOND_Z}
 #endif
 
 /** \brief Maximum allowable jerk.
@@ -782,13 +807,13 @@ If the cache contains less then MOVE_CACHE_LOW segments, the time per segment is
 If a move would be shorter, the feedrate will be reduced. This should prevent buffer underflows. Set this to 0 if you
 don't care about empty buffers during print.
 */
-#define MOVE_CACHE_LOW 12
+#define MOVE_CACHE_LOW 10
 /** \brief Cycles per move, if move cache is low. 
 
 This value must be high enough, that the buffer has time to fill up. The problem only occurs at the beginning of a print or
 if you are printing many very short segments at high speed. Higher delays here allow higher values in PATH_PLANNER_CHECK_SEGMENTS.
 */
-#define LOW_TICKS_PER_MOVE 300000
+#define LOW_TICKS_PER_MOVE 150000
 
 // ##########################################################################################
 // ##                           Extruder control                                           ##
@@ -822,7 +847,7 @@ set USE_OPS 0
 
 Caution: Don't enable anti-ooze in your slicer if you are using this. 
 */
-#define USE_OPS 1
+#define USE_OPS 0
 
 /** \brief Sets the ops operation mode
 
@@ -943,11 +968,16 @@ matches, the stored values are used to overwrite the settings.
 IMPORTANT: With mode <>0 some changes in configuration.h are not set any more, as they are 
            taken from the EEPROM.
 */
-#define EEPROM_MODE 1
-/** Comment out (using // at the start of the line) to disable SD support: */
-#define SDSUPPORT
+#define EEPROM_MODE 5
+/** Set to false to disable SD support: */
+#define SDSUPPORT true
+// Uncomment to enable or changed card detection pin. With card detection the card is mounted on insertion.
+#define SDCARDDETECT 49
+// Change to true if you get a inserted message on removal. 
+#define SDCARDDETECTINVERTED false
 /** Show extended directory including file length. Don't use this with pronterface! */
 #define SD_EXTENDED_DIR
-
+// If you want support for G2/G3 arc commands set to true, otherwise false.
+#define ARC_SUPPORT true
 #endif
 

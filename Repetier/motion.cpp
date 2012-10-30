@@ -6,7 +6,7 @@
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
 
-    Foobar is distributed in the hope that it will be useful,
+    Repetier-Firmware is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
@@ -51,25 +51,53 @@ inline unsigned long U16SquaredToU32(unsigned int val) {
 }
 /**
 Computes the maximum junction speed
+
+p1 = previous segment
+p2 = new segment
 */
 inline void computeMaxJunctionSpeed(PrintLine *p1,PrintLine *p2) {
   if(p1->flags & FLAG_WARMUP) {
     p2->joinFlags |= FLAG_JOIN_START_FIXED;
     return;
   }
-   // First we compute the normalized jerk for spped 1
-   float dx = p2->speedX*p2->invFullSpeed-p1->speedX*p1->invFullSpeed;
-   float dy = p2->speedY*p2->invFullSpeed-p1->speedY*p1->invFullSpeed;
-   float normJerk;
-   if((p1->dir & 128)==0 && (p2->dir & 128)==0)
-     normJerk = sqrt(dx*dx+dy*dy);
-   else {
-     float dz = (p2->speedZ*p2->invFullSpeed-p1->speedZ*p1->invFullSpeed)*printer_state.maxJerk/printer_state.maxZJerk;
-     normJerk = sqrt(dx*dx+dy*dy+dz*dz);
+#if DRIVE_SYSTEM==3
+  if (p1->moveID == p2->moveID) { // Avoid computing junction speed for split delta lines
+	p1->maxJunctionSpeed = p1->fullSpeed;
+	return;
+  }
+#endif
+   // First we compute the normalized jerk for speed 1
+   //float dx = p2->speedX*p2->invFullSpeed-p1->speedX*p1->invFullSpeed;
+   //float dy = p2->speedY*p2->invFullSpeed-p1->speedY*p1->invFullSpeed;
+   float dx = p2->speedX-p1->speedX;
+   float dy = p2->speedY-p1->speedY;
+   float factor=1,tmp;
+#if (DRIVE_SYSTEM == 3) // No point computing Z Jerk separately for delta moves
+   float dz = p2->speedZ-p1->speedZ;
+   float jerk = sqrt(dx*dx+dy*dy+dz*dz);
+#else
+   float jerk = sqrt(dx*dx+dy*dy);
+#endif
+   if(jerk>printer_state.maxJerk)
+     factor = printer_state.maxJerk/jerk;
+#if (DRIVE_SYSTEM!=3)
+   if((p1->dir & 64) || (p2->dir & 64)) {
+   //  float dz = (p2->speedZ*p2->invFullSpeed-p1->speedZ*p1->invFullSpeed)*printer_state.maxJerk/printer_state.maxZJerk;
+     float dz = fabs(p2->speedZ-p1->speedZ);
+     if(dz>printer_state.maxZJerk) {
+       tmp = printer_state.maxZJerk/dz;
+       if(tmp<factor) factor = tmp;
+     }
    }
-   p1->maxJunctionSpeed = printer_state.maxJerk/normJerk;
-   if(p1->maxJunctionSpeed>p1->fullSpeed) p1->maxJunctionSpeed = p1->fullSpeed;
+#endif
+   float eJerk = fabs(p2->speedE-p1->speedE);
+   if(eJerk>current_extruder->maxStartFeedrate) {
+     tmp = current_extruder->maxStartFeedrate/eJerk;
+     if(tmp<factor) factor = tmp;
+   }
+   p1->maxJunctionSpeed = p1->fullSpeed*factor;
    if(p1->maxJunctionSpeed>p2->fullSpeed) p1->maxJunctionSpeed = p2->fullSpeed;
+   //if(DEBUG_ECHO) OUT_P_F_LN("JSPD:",p1->maxJunctionSpeed);
 }
 
 /** Update parameter used by updateTrapezoids
@@ -88,7 +116,7 @@ void updateStepsParameter(PrintLine *p/*,byte caller*/) {
     p->decelSteps = ((vmax2-U16SquaredToU32(p->vEnd))/(p->accelerationPrim<<1))+1;
 #ifdef USE_ADVANCE
 #ifdef ENABLE_QUADRATIC_ADVANCE
-    p->advanceStart = (float)p->advanceFull*p->startFactor*p->startFactor;
+    p->advanceStart = (float)p->advanceFull*startFactor * startFactor;
     p->advanceEnd = (float)p->advanceFull*endFactor*endFactor;
 #endif
 #endif
@@ -107,7 +135,6 @@ void updateStepsParameter(PrintLine *p/*,byte caller*/) {
 #ifdef DEBUG_QUEUE_MOVE
     if(DEBUG_ECHO) {
       out.print_int_P(PSTR("ID:"),(int)p);
-    //  out.println_int_P(PSTR("/"),(int)caller);
       out.print_int_P(PSTR("vStart/End:"),p->vStart);
       out.println_int_P(PSTR("/"),p->vEnd);
       out.print_int_P(PSTR("accel/decel steps:"),p->accelSteps);
@@ -123,14 +150,31 @@ void updateStepsParameter(PrintLine *p/*,byte caller*/) {
     }
 #endif
 }
+void testnum(float x,char c) {
+if (isnan(x)) {
+    out.print(c);
+    OUT_P_LN("NAN");
+    return;
+  }
 
-#define PREVIOUS_PLANNER_INDEX(p) p--;if(p==255) p = MOVE_CACHE_SIZE-1;
-#define NEXT_PLANNER_INDEX(idx) ++idx;if(idx==MOVE_CACHE_SIZE) idx=0;
+  if (isinf(x)) {
+    out.print(c);
+     OUT_P_LN("INF");
+    return;
+  }
+}
 
+/**
+Compute the maximum speed from the last entered move.
+
+p = last line inserted
+last = last element until we check
+*/
 inline void backwardPlanner(byte p,byte last) {
+  if(p==last) return;
   PrintLine *act = &lines[p],*prev;
-  float lastJunctionSpeed = act->startSpeed;
-  PREVIOUS_PLANNER_INDEX(last);
+  float lastJunctionSpeed = act->endSpeed; // Start always with safe speed
+  //PREVIOUS_PLANNER_INDEX(last); // Last element is already fixed in start speed
   while(p!=last) {
     PREVIOUS_PLANNER_INDEX(p);
     prev = &lines[p];
@@ -160,53 +204,68 @@ inline void backwardPlanner(byte p,byte last) {
     }
 #endif
     // Switch move-retraction or vice versa start always with save speeds! Keeps extruder from blocking
-    if((prev->dir & 240)==128 || (act->dir & 240)==128) {
+	if(((prev->dir & 240)!=128) && ((act->dir & 240)==128)) { // switch move - extruder only move
       prev->joinFlags |= FLAG_JOIN_END_FIXED;
       act->joinFlags |= FLAG_JOIN_START_FIXED;
       return;          
     } 
-    if(prev->joinFlags & FLAG_JOIN_END_FIXED) { // Nothing to update from here on
+    if(prev->joinFlags & FLAG_JOIN_END_FIXED) { // Nothing to update from here on, happens when path optimize disabled
       act->joinFlags |= FLAG_JOIN_START_FIXED; // Wait only with safe speeds!
       return;
     }
     lastJunctionSpeed = sqrt(lastJunctionSpeed*lastJunctionSpeed+act->acceleration); // acceleration is acceleration*distance*2! What can be reached if we try?
     if(lastJunctionSpeed>=prev->maxJunctionSpeed) { // Limit is reached
-        act->startSpeed = prev->endSpeed = prev->maxJunctionSpeed; // possibly unneeded???
-        //prev->joinFlags |= FLAG_JOIN_END_FIXED;
+      if(prev->endSpeed!=prev->maxJunctionSpeed) {
         prev->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
-        //act->joinFlags |= FLAG_JOIN_START_FIXED;
+        prev->endSpeed = prev->maxJunctionSpeed; // possibly unneeded???
+      }        
+      if(act->startSpeed!=prev->maxJunctionSpeed) {
+        act->startSpeed = prev->maxJunctionSpeed; // possibly unneeded???
         act->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
-        return;     
     }
+      lastJunctionSpeed = prev->maxJunctionSpeed;     
+    } else {
     act->startSpeed = prev->endSpeed = lastJunctionSpeed;
     prev->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
     act->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
+    }
     act = prev;
+  } // while loop
     if(lines_count>=MOVE_CACHE_LOW) { // we have time for checks
         UI_MEDIUM; // do check encoder
         check_periodical(); // Temperature update
     }
-  } // while loop
 }
-
 inline void forwardPlanner(byte p) {
-  PrintLine *act = &lines[p],*next;
-  float leftspeed = act->startSpeed;
+  PrintLine *act,*next;
+  if(p==lines_write_pos) return;
   byte last = lines_write_pos;
-  NEXT_PLANNER_INDEX(last);
+  //NEXT_PLANNER_INDEX(last);
   next = &lines[p];
+  float leftspeed = next->startSpeed;
+   //   testnum(leftspeed,'E');
+
   while(p!=last) { // All except last segment, which has fixed end speed
     act = next;
     NEXT_PLANNER_INDEX(p);
     next = &lines[p];
     if(act->joinFlags & FLAG_JOIN_END_FIXED) {
       leftspeed = act->endSpeed;
+    //  testnum(leftspeed,'A');
       continue; // Nothing to do here
     }
-    float vmax_right = sqrt(leftspeed+act->acceleration); // acceleration is 2*acceleration*distance!
-    if(vmax_right>act->endSpeed) { // Could be higher next run
+    //      testnum(leftspeed,'C');
+    //  testnum(act->acceleration,'D');
+
+    float vmax_right = sqrt(leftspeed*leftspeed+act->acceleration); // acceleration is 2*acceleration*distance!
+   //   testnum(vmax_right,'B');
+    if(vmax_right>act->endSpeed) { // Could be higher next run?
       act->startSpeed = leftspeed;
-      leftspeed = vmax_right;
+      leftspeed       = act->endSpeed;
+      if(act->endSpeed==act->maxJunctionSpeed) {// Full speed reached, don't compute again!
+        act->joinFlags  |= FLAG_JOIN_END_FIXED;
+        next->joinFlags |= FLAG_JOIN_START_FIXED;
+      }
       act->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
     } else { // We can accelerate full speed without reaching limit, which is as fast as possible. Fix it!
       act->joinFlags |= FLAG_JOIN_END_FIXED | FLAG_JOIN_START_FIXED;
@@ -216,6 +275,7 @@ inline void forwardPlanner(byte p) {
       next->joinFlags |= FLAG_JOIN_START_FIXED;
     }
   }
+  next->startSpeed = leftspeed; // This is the new segment, wgich is updated anyway, no extra flag needed.
 }
 
 /**
@@ -229,23 +289,33 @@ The first 2 entries in the queue are not checked. The first is the one that is a
 The method is called before lines_count is increased!
 */
 void updateTrapezoids(byte p) {
-  byte first;
+  byte first = p;
   PrintLine *firstLine;
+  PrintLine *act = &lines[p];
   BEGIN_INTERRUPT_PROTECTED; 
-  first = lines_pos; // first non fixed segment
-  NEXT_PLANNER_INDEX(first); // don't touch the line printing
-  while(first!=p && (lines[p].joinFlags | FLAG_JOIN_END_FIXED)) {
+  byte maxfirst = lines_pos; // first non fixed segment
+  if(maxfirst!=p)
+    NEXT_PLANNER_INDEX(maxfirst); // don't touch the line printing
+  if(maxfirst!=p)
+    NEXT_PLANNER_INDEX(maxfirst); // don't touch the the next line, could come active
+  if(maxfirst!=p)
+    NEXT_PLANNER_INDEX(maxfirst); // don't touch the the next line, could come active
+  while(first!=maxfirst && !(lines[first].joinFlags & FLAG_JOIN_END_FIXED)) {
+    PREVIOUS_PLANNER_INDEX(first);
+  }
+  if(first!=p && (lines[first].joinFlags & FLAG_JOIN_END_FIXED)) {
     NEXT_PLANNER_INDEX(first);
   }
+  // First is now the new element or the first element with non fixed end speed.
+  // anyhow, the start speed of first is fixed
   firstLine = &lines[first];
   firstLine->flags |= FLAG_BLOCKED; // don't let printer touch this or following segments during update
   END_INTERRUPT_PROTECTED; 
-  PrintLine *act = &lines[p];
 
   byte previdx = p-1;
   if(previdx>=MOVE_CACHE_SIZE) previdx = MOVE_CACHE_SIZE-1;
-  if(lines_count)
-    computeMaxJunctionSpeed(&lines[previdx],act); // Set maximum junction speed
+  if(lines_count && (lines[previdx].flags & FLAG_WARMUP)==0)
+    computeMaxJunctionSpeed(&lines[previdx],act); // Set maximum junction speed if we have a real move before
   else
     act->joinFlags |= FLAG_JOIN_START_FIXED;
 
@@ -256,10 +326,12 @@ void updateTrapezoids(byte p) {
   // Update precomputed data
   do {
     updateStepsParameter(&lines[first]);
+    lines[first].flags &= ~FLAG_BLOCKED;  // Flying block to release next used segment as early as possible
     NEXT_PLANNER_INDEX(first);
+    lines[first].flags |= FLAG_BLOCKED;
   } while(first!=lines_write_pos);
   updateStepsParameter(act);
-  firstLine->flags &= ~FLAG_BLOCKED; // unblock for interrupt routine
+  act->flags &= ~FLAG_BLOCKED;
 }
 
 
@@ -270,14 +342,14 @@ void updateTrapezoids(byte p) {
 inline float safeSpeed(PrintLine *p) {
   float safe = printer_state.maxJerk*0.5;
   if(p->dir & 64) {
-    if(abs(p->speedZ)>printer_state.maxZJerk*0.5) {
-      float safe2 = printer_state.maxZJerk*0.5*p->fullSpeed/abs(p->speedZ);
+    if(fabs(p->speedZ)>printer_state.maxZJerk*0.5) {
+      float safe2 = printer_state.maxZJerk*0.5*p->fullSpeed/fabs(p->speedZ);
       if(safe2<safe) safe = safe2;
     }
   }
   if(p->dir & 128) {
     if(p->dir & 112) {
-      float safe2 = 0.5*current_extruder->maxStartFeedrate*p->fullSpeed/abs(p->speedE);
+      float safe2 = 0.5*current_extruder->maxStartFeedrate*p->fullSpeed/fabs(p->speedE);
       if(safe2<safe) safe = safe2;
     } else {
       safe = 0.5*current_extruder->maxStartFeedrate; // This is a retraction move
@@ -313,12 +385,12 @@ void move_steps(long x,long y,long z,long e,float feedrate,bool waitEnd,bool che
 not act on the first two moves in the queue. The stepper timer will spot these moves and leave some time for
 processing.
 */
-byte check_new_move(byte pathOptimize) {
+byte check_new_move(byte pathOptimize, byte lines_to_wait) {
   if(lines_count==0 && waitRelax==0 && pathOptimize) { // First line after some time - warmup needed
 #ifdef DEBUG_OPS
     out.println_P(PSTR("New path"));
 #endif
-    byte w = 3;
+    byte w = lines_to_wait;
     PrintLine *p = &lines[lines_write_pos];
     while(w) {
       p->flags = FLAG_WARMUP;
@@ -382,24 +454,26 @@ void calculate_move(PrintLine *p,float axis_diff[],byte check_endstops,byte path
   float time_for_move = (float)(F_CPU)*p->distance / printer_state.feedrate; // time is in ticks
   bool critical=false;
   if(lines_count<MOVE_CACHE_LOW && time_for_move<LOW_TICKS_PER_MOVE) { // Limit speed to keep cache full.
+    //OUT_P_I("L:",lines_count);
     time_for_move += (3*(LOW_TICKS_PER_MOVE-time_for_move))/(lines_count+1); // Increase time if queue gets empty. Add more time if queue gets smaller.
+    //OUT_P_F_LN("Slow ",time_for_move);
     critical=true;
   }
   UI_MEDIUM; // do check encoder
   // Compute the solwest allowed interval (ticks/step), so maximum feedrate is not violated
   long limitInterval = time_for_move/p->stepsRemaining; // until not violated by other constraints it is your target speed
-  axis_interval[0] = abs(axis_diff[0])*F_CPU/(max_feedrate[0]*p->stepsRemaining); // mm*ticks/s/(mm/s*steps) = ticks/step
+  axis_interval[0] = fabs(axis_diff[0])*F_CPU/(max_feedrate[0]*p->stepsRemaining); // mm*ticks/s/(mm/s*steps) = ticks/step
   if(axis_interval[0]>limitInterval) limitInterval = axis_interval[0];
-  axis_interval[1] = abs(axis_diff[1])*F_CPU/(max_feedrate[1]*p->stepsRemaining);
+  axis_interval[1] = fabs(axis_diff[1])*F_CPU/(max_feedrate[1]*p->stepsRemaining);
   if(axis_interval[1]>limitInterval) limitInterval = axis_interval[1];
   if(p->dir & 64) { // normally no move in z direction
-    axis_interval[2] = abs((float)axis_diff[2])*(float)F_CPU/(float)(max_feedrate[2]*p->stepsRemaining); // must prevent overflow!
+    axis_interval[2] = fabs((float)axis_diff[2])*(float)F_CPU/(float)(max_feedrate[2]*p->stepsRemaining); // must prevent overflow!
     if(axis_interval[2]>limitInterval) limitInterval = axis_interval[2];
   } else axis_interval[2] = 0;
-  axis_interval[3] = abs(axis_diff[3])*F_CPU/(max_feedrate[3]*p->stepsRemaining);
+  axis_interval[3] = fabs(axis_diff[3])*F_CPU/(max_feedrate[3]*p->stepsRemaining);
   if(axis_interval[3]>limitInterval) limitInterval = axis_interval[3];
 #if DRIVE_SYSTEM==3
-  axis_interval[4] = abs(axis_diff[4])*F_CPU/(max_feedrate[0]*p->stepsRemaining);
+  axis_interval[4] = fabs(axis_diff[4])*F_CPU/(max_feedrate[0]*p->stepsRemaining);
 #endif
 
   p->fullInterval = limitInterval>200 ? limitInterval : 200; // This is our target speed
@@ -517,7 +591,7 @@ void calculate_move(PrintLine *p,float axis_diff[],byte check_endstops,byte path
 #ifdef DEBUG_STEPCOUNT
 // Set in delta move calculation
 #if DRIVE_SYSTEM!=3
-  p->totalStepsRemaining = p->delta[0]+p->delta[1];
+  p->totalStepsRemaining = p->delta[0]+p->delta[1]+p->delta[2];
 #endif
 #endif
 #ifdef DEBUG_QUEUE_MOVE
@@ -538,9 +612,7 @@ void calculate_move(PrintLine *p,float axis_diff[],byte check_endstops,byte path
 BEGIN_INTERRUPT_PROTECTED
   lines_count++;
 END_INTERRUPT_PROTECTED
-#ifdef DEBUG_FREE_MEMORY
-    check_mem();
-#endif
+  DEBUG_MEMORY;
 }
 
 #if DRIVE_SYSTEM != 3
@@ -556,7 +628,7 @@ void queue_move(byte check_endstops,byte pathOptimize) {
     gcode_read_serial();
     check_periodical();
   }
-  byte newPath=check_new_move(pathOptimize);
+  byte newPath=check_new_move(pathOptimize, 3);
   PrintLine *p = &lines[lines_write_pos];
   float axis_diff[4]; // Axis movement in mm
   if(check_endstops) p->flags = FLAG_CHECK_ENDSTOPS;
@@ -623,6 +695,7 @@ p->delta[1] = deltay-deltax;
     printer_state.currentPositionSteps[i] = printer_state.destinationSteps[i];
   }
 #endif
+  if((p->dir & 240)==0) return; // No steps included
   byte primary_axis;
   float xydist2;
 #if USE_OPS==1
@@ -697,7 +770,7 @@ p->delta[1] = deltay-deltax;
       p->distance = sqrt(xydist2);
     }
   }  else if(p->dir & 128)
-    p->distance = abs(axis_diff[3]);
+    p->distance = fabs(axis_diff[3]);
   else {
     return; // no steps to take, we are finished
   }
@@ -728,12 +801,14 @@ inline long calculate_delta_segments(PrintLine *p, byte softEndstop) {
 #endif
 
 	long max_axis_move = 0;
+	unsigned int produced_segments = 0;
 	for (int s = p->numDeltaSegments; s > 0; s--) {
 		for(byte i=0; i < NUM_AXIS - 1; i++)
 			destination_steps[i] += (printer_state.destinationSteps[i] - destination_steps[i]) / s;
 
 		// Wait for buffer here
-		while(delta_segment_count>=DELTA_CACHE_SIZE) { // wait for a free entry in movement cache
+//		while(delta_segment_count>=DELTA_CACHE_SIZE) { // wait for a free entry in movement cache
+		while(delta_segment_count + produced_segments>=DELTA_CACHE_SIZE) { // wait for a free entry in movement cache
 			gcode_read_serial();
 			check_periodical();
 		}
@@ -751,7 +826,9 @@ inline long calculate_delta_segments(PrintLine *p, byte softEndstop) {
 //				out.println_long_P(PSTR("dest:"), destination_delta_steps[i]);
 //				out.println_long_P(PSTR("cur:"), printer_state.currentDeltaPositionSteps[i]);
 //#endif
-				if (delta >= 0) {
+				if (delta == 0) {
+					d->deltaSteps[i] = 0;
+				} else if (delta > 0) {
 					d->dir |= 17<<i;
 	#ifdef DEBUG_DELTA_OVERFLOW
 					if (delta > 65535)
@@ -783,10 +860,15 @@ inline long calculate_delta_segments(PrintLine *p, byte softEndstop) {
 		}
 		// Move to the next segment
 		delta_segment_write_pos++; if (delta_segment_write_pos >= DELTA_CACHE_SIZE) delta_segment_write_pos=0;
-		BEGIN_INTERRUPT_PROTECTED
-		delta_segment_count++;
-		END_INTERRUPT_PROTECTED
+//		BEGIN_INTERRUPT_PROTECTED
+//		delta_segment_count++;
+//		END_INTERRUPT_PROTECTED
+		produced_segments++;
 	}
+	BEGIN_INTERRUPT_PROTECTED
+	delta_segment_count+=produced_segments;
+	END_INTERRUPT_PROTECTED
+
 	#ifdef DEBUG_STEPCOUNT
 //		out.println_long_P(PSTR("totalStepsRemaining:"), p->totalStepsRemaining);
 	#endif
@@ -865,7 +947,7 @@ inline byte calculate_distance(float axis_diff[], byte dir, float *distance) {
 			*distance = sqrt(axis_diff[0] * axis_diff[0] + axis_diff[1] * axis_diff[1]);
 		}
 	} else if(dir & 128)
-		*distance = abs(axis_diff[3]);
+		*distance = fabs(axis_diff[3]);
 	else {
 		return 0; // no steps to take, we are finished
 	}
@@ -891,7 +973,7 @@ inline void queue_E_move(long e_diff,byte check_endstops,byte pathOptimize) {
     gcode_read_serial();
     check_periodical();
   }
-  byte newPath=check_new_move(pathOptimize);
+  byte newPath=check_new_move(pathOptimize, 3);
   PrintLine *p = &lines[lines_write_pos];
   float axis_diff[4]; // Axis movement in mm
   if(check_endstops) p->flags = FLAG_CHECK_ENDSTOPS;
@@ -924,7 +1006,7 @@ inline void queue_E_move(long e_diff,byte check_endstops,byte pathOptimize) {
   //Define variables that are needed for the Bresenham algorithm. Please note that  Z is not currently included in the Bresenham algorithm.
   p->primaryAxis = 3;
   p->stepsRemaining = p->delta[3];
-  p->distance = abs(axis_diff[3]);
+  p->distance = fabs(axis_diff[3]);
   calculate_move(p,axis_diff,check_endstops,pathOptimize);
 }
 
@@ -974,10 +1056,10 @@ void split_delta_move(byte check_endstops,byte pathOptimize, byte softEndstop) {
 	int segment_count;
 	int num_lines;
 	int segments_per_line;
-	
+
 	if (save_dir & 48) {
 		// Compute number of seconds for move and hence number of segments needed
-		float seconds = 6000 * save_distance / (printer_state.feedrate * printer_state.feedrateMultiply);
+		float seconds = 100 * save_distance / (printer_state.feedrate * printer_state.feedrateMultiply);
 #ifdef DEBUG_SPLIT
 		out.println_float_P(PSTR("Seconds: "), seconds);
 #endif
@@ -1015,7 +1097,7 @@ void split_delta_move(byte check_endstops,byte pathOptimize, byte softEndstop) {
 	}
 
 	// Insert dummy moves if necessary
-	byte newPath=check_new_move(pathOptimize);
+	byte newPath=check_new_move(pathOptimize, (num_lines > 1 ? 5 : 3));
 
 	for (int line_number=1; line_number < num_lines + 1; line_number++) {
 		while(lines_count>=MOVE_CACHE_SIZE) { // wait for a free entry in movement cache
@@ -1043,6 +1125,7 @@ void split_delta_move(byte check_endstops,byte pathOptimize, byte softEndstop) {
 		}
 
 		p->joinFlags = 0;
+		p->moveID = lastMoveID;
 
 		// Only set fixed on last segment
 		if (line_number == num_lines && !pathOptimize)
@@ -1065,6 +1148,11 @@ void split_delta_move(byte check_endstops,byte pathOptimize, byte softEndstop) {
 		out.println_long_P(PSTR("Max DS:"), max_delta_step);
 	#endif
 		long virtual_axis_move = max_delta_step * segments_per_line;
+		if (virtual_axis_move == 0 && p->delta[3] == 0) {
+			if (num_lines!=1)
+				OUT_P_LN("ERROR: No move in delta segment with > 1 segment. This should never happen and may cause a problem!");
+			return;  // Line too short in low precision area
+		}
 		p->primaryAxis = 4; // Virtual axis will lead bresenham step either way
 		if (virtual_axis_move > p->delta[3]) { // Is delta move or E axis leading
 			p->stepsRemaining = virtual_axis_move;
@@ -1087,7 +1175,142 @@ void split_delta_move(byte check_endstops,byte pathOptimize, byte softEndstop) {
 			printer_state.currentPositionSteps[i] += fractional_steps[i];
 		}
 	}
+	lastMoveID++; // Will wrap at 255
 }
 
 #endif
 
+#if ARC_SUPPORT
+// Arc function taken from grbl
+// The arc is approximated by generating a huge number of tiny, linear segments. The length of each 
+// segment is configured in settings.mm_per_arc_segment.  
+void mc_arc(float *position, float *target, float *offset, float radius, uint8_t isclockwise)
+{      
+  //   int acceleration_manager_was_enabled = plan_is_acceleration_manager_enabled();
+  //   plan_set_acceleration_manager_enabled(false); // disable acceleration management for the duration of the arc
+  float center_axis0 = position[0] + offset[0];
+  float center_axis1 = position[1] + offset[1];
+  float linear_travel = 0; //target[axis_linear] - position[axis_linear];
+  float extruder_travel = printer_state.destinationSteps[3]-printer_state.currentPositionSteps[3];
+  float r_axis0 = -offset[0];  // Radius vector from center to current location
+  float r_axis1 = -offset[1];
+  float rt_axis0 = target[0] - center_axis0;
+  float rt_axis1 = target[1] - center_axis1;
+  
+  // CCW angle between position and target from circle center. Only one atan2() trig computation required.
+  float angular_travel = atan2(r_axis0*rt_axis1-r_axis1*rt_axis0, r_axis0*rt_axis0+r_axis1*rt_axis1);
+  if (angular_travel < 0) { angular_travel += 2*M_PI; }
+  if (isclockwise) { angular_travel -= 2*M_PI; }
+  
+  float millimeters_of_travel = hypot(angular_travel*radius, fabs(linear_travel));
+  if (millimeters_of_travel < 0.001) { return; }
+  uint16_t segments = floor(millimeters_of_travel/MM_PER_ARC_SEGMENT);
+  if(segments == 0) segments = 1;
+
+  /*  
+    // Multiply inverse feed_rate to compensate for the fact that this movement is approximated
+    // by a number of discrete segments. The inverse feed_rate should be correct for the sum of 
+    // all segments.
+    if (invert_feed_rate) { feed_rate *= segments; }
+  */
+  float theta_per_segment = angular_travel/segments;
+  float linear_per_segment = linear_travel/segments;
+  float extruder_per_segment = extruder_travel/segments;
+  
+  /* Vector rotation by transformation matrix: r is the original vector, r_T is the rotated vector,
+     and phi is the angle of rotation. Based on the solution approach by Jens Geisler.
+         r_T = [cos(phi) -sin(phi);
+                sin(phi)  cos(phi] * r ;
+     
+     For arc generation, the center of the circle is the axis of rotation and the radius vector is 
+     defined from the circle center to the initial position. Each line segment is formed by successive
+     vector rotations. This requires only two cos() and sin() computations to form the rotation
+     matrix for the duration of the entire arc. Error may accumulate from numerical round-off, since
+     all double numbers are single precision on the Arduino. (True double precision will not have
+     round off issues for CNC applications.) Single precision error can accumulate to be greater than
+     tool precision in some cases. Therefore, arc path correction is implemented. 
+
+     Small angle approximation may be used to reduce computation overhead further. This approximation
+     holds for everything, but very small circles and large mm_per_arc_segment values. In other words,
+     theta_per_segment would need to be greater than 0.1 rad and N_ARC_CORRECTION would need to be large
+     to cause an appreciable drift error. N_ARC_CORRECTION~=25 is more than small enough to correct for 
+     numerical drift error. N_ARC_CORRECTION may be on the order a hundred(s) before error becomes an
+     issue for CNC machines with the single precision Arduino calculations.
+     
+     This approximation also allows mc_arc to immediately insert a line segment into the planner 
+     without the initial overhead of computing cos() or sin(). By the time the arc needs to be applied
+     a correction, the planner should have caught up to the lag caused by the initial mc_arc overhead. 
+     This is important when there are successive arc motions. 
+  */
+  // Vector rotation matrix values
+  float cos_T = 1-0.5*theta_per_segment*theta_per_segment; // Small angle approximation
+  float sin_T = theta_per_segment;
+  
+  float arc_target[4];
+  float sin_Ti;
+  float cos_Ti;
+  float r_axisi;
+  uint16_t i;
+  int8_t count = 0;
+
+  // Initialize the linear axis
+  //arc_target[axis_linear] = position[axis_linear];
+  
+  // Initialize the extruder axis
+  arc_target[3] = printer_state.currentPositionSteps[3];
+
+  for (i = 1; i<segments; i++) 
+  { // Increment (segments-1)
+    
+    if((count & 4) == 0)
+    {
+       gcode_read_serial();
+       check_periodical();
+    }
+
+    if (count < N_ARC_CORRECTION)  //25 pieces
+    {
+      // Apply vector rotation matrix 
+      r_axisi = r_axis0*sin_T + r_axis1*cos_T;
+      r_axis0 = r_axis0*cos_T - r_axis1*sin_T;
+      r_axis1 = r_axisi;
+      count++;
+    }
+    else
+    {
+      // Arc correction to radius vector. Computed only every N_ARC_CORRECTION increments.
+      // Compute exact location by applying transformation matrix from initial radius vector(=-offset).
+      cos_Ti  = cos(i*theta_per_segment);
+      sin_Ti  = sin(i*theta_per_segment);
+      r_axis0 = -offset[0]*cos_Ti + offset[1]*sin_Ti;
+      r_axis1 = -offset[0]*sin_Ti - offset[1]*cos_Ti;
+      count = 0;
+    }
+
+    // Update arc_target location
+    arc_target[0] = center_axis0 + r_axis0;
+    arc_target[1] = center_axis1 + r_axis1;
+    //arc_target[axis_linear] += linear_per_segment;
+    arc_target[3] += extruder_per_segment;
+    
+    printer_state.destinationSteps[0] = arc_target[0]*axis_steps_per_unit[0];
+    printer_state.destinationSteps[1] = arc_target[1]*axis_steps_per_unit[1];
+    printer_state.destinationSteps[3] = arc_target[3];
+#if DRIVE_SYSTEM == 3
+    split_delta_move(ALWAYS_CHECK_ENDSTOPS, true, true);
+#else
+    queue_move(ALWAYS_CHECK_ENDSTOPS,true);
+#endif
+  }
+  // Ensure last segment arrives at target location.
+    printer_state.destinationSteps[0] = target[0]*axis_steps_per_unit[0];
+    printer_state.destinationSteps[1] = target[1]*axis_steps_per_unit[1];
+    printer_state.destinationSteps[3] = target[3];
+#if DRIVE_SYSTEM == 3
+    split_delta_move(ALWAYS_CHECK_ENDSTOPS, true, true);
+#else
+    queue_move(ALWAYS_CHECK_ENDSTOPS,true);
+#endif
+  //   plan_set_acceleration_manager_enabled(acceleration_manager_was_enabled);
+}
+#endif
