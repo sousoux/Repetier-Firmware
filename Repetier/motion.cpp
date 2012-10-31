@@ -60,7 +60,6 @@ inline void computeMaxJunctionSpeed(PrintLine *p1,PrintLine *p2) {
     p2->joinFlags |= FLAG_JOIN_START_FIXED;
     return;
   }
-
 #if DRIVE_SYSTEM==3
   if (p1->moveID == p2->moveID) { // Avoid computing junction speed for split delta lines
 	if(p1->fullSpeed>p2->fullSpeed) 
@@ -300,10 +299,12 @@ void updateTrapezoids(byte p) {
   byte maxfirst = lines_pos; // first non fixed segment
   if(maxfirst!=p)
     NEXT_PLANNER_INDEX(maxfirst); // don't touch the line printing
-  if(maxfirst!=p)
-    NEXT_PLANNER_INDEX(maxfirst); // don't touch the the next line, could come active
-// if(maxfirst!=p)
-// NEXT_PLANNER_INDEX(maxfirst); // don't touch the the next line, could come active
+  // Now ignore enough segments to gain enough time for path planning
+  long timeleft = 0;
+  while(timeleft<700000 && maxfirst!=p) {
+    timeleft+=lines[maxfirst].timeInTicks;
+    NEXT_PLANNER_INDEX(maxfirst);
+  }
   while(first!=maxfirst && !(lines[first].joinFlags & FLAG_JOIN_END_FIXED)) {
     PREVIOUS_PLANNER_INDEX(first);
   }
@@ -344,7 +345,7 @@ void updateTrapezoids(byte p) {
 // ##########################################################################
 
 inline float safeSpeed(PrintLine *p) {
-  float safe = printer_state.maxJerk*0.25;
+  float safe = printer_state.maxJerk*0.5;
 #if DRIVE_SYSTEM != 3
   if(p->dir & 64) {
     if(fabs(p->speedZ)>printer_state.maxZJerk*0.5) {
@@ -403,7 +404,7 @@ byte check_new_move(byte pathOptimize, byte waitExtraLines) {
       p->joinFlags = FLAG_JOIN_STEPPARAMS_COMPUTED | FLAG_JOIN_END_FIXED | FLAG_JOIN_START_FIXED;
       p->dir = 0;
       p->primaryAxis = w + waitExtraLines;
-      p->accelerationPrim = p->facceleration = 10000*(unsigned int)w;
+      p->timeInTicks = p->accelerationPrim = p->facceleration = 10000*(unsigned int)w;
       lines_write_pos++;
       if(lines_write_pos>=MOVE_CACHE_SIZE) lines_write_pos = 0;
 BEGIN_INTERRUPT_PROTECTED
@@ -465,6 +466,7 @@ void calculate_move(PrintLine *p,float axis_diff[],byte check_endstops,byte path
     //OUT_P_F_LN("Slow ",time_for_move);
     critical=true;
   }
+  p->timeInTicks = time_for_move;
   UI_MEDIUM; // do check encoder
   // Compute the solwest allowed interval (ticks/step), so maximum feedrate is not violated
   long limitInterval = time_for_move/p->stepsRemaining; // until not violated by other constraints it is your target speed
@@ -612,8 +614,7 @@ void calculate_move(PrintLine *p,float axis_diff[],byte check_endstops,byte path
   }
 #endif
   // Make result permanent
-  lines_write_pos++;
-  if(lines_write_pos>=MOVE_CACHE_SIZE) lines_write_pos = 0;
+  NEXT_PLANNER_INDEX(lines_write_pos);
   if (pathOptimize) waitRelax = 70;
 BEGIN_INTERRUPT_PROTECTED
   lines_count++;
@@ -1103,7 +1104,7 @@ void split_delta_move(byte check_endstops,byte pathOptimize, byte softEndstop) {
 	}
 
 	// Insert dummy moves if necessary
-	byte newPath=check_new_move(pathOptimize, num_lines - 1);
+	byte newPath=check_new_move(pathOptimize, min(MOVE_CACHE_SIZE-3,num_lines-1));
 
 	for (int line_number=1; line_number < num_lines + 1; line_number++) {
 		while(lines_count>=MOVE_CACHE_SIZE) { // wait for a free entry in movement cache

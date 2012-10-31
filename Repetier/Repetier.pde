@@ -99,6 +99,9 @@ Custom M Codes
 - M232 - Read and reset max. advance values
 - M233 X<AdvanceK> - Set temporary advance K-value to X
 - M350 S<mstepsAll> X<mstepsX> Y<mstepsY> Z<mstepsZ> E<mstepsE0> P<mstespE1> : Set microstepping on RAMBO board
+- M500 Store settings to EEPROM
+- M501 Load settings from EEPROM
+- M502 Reset settings to the one in configuration.h. Does not store values in EEPROM!
 - M400 - Wait until move buffers empty.
 - M908 P<address> S<value> : Set stepper current for digipot (RAMBO board)
 */
@@ -1946,6 +1949,9 @@ OUT_P_L_LN("MSteps:",cur->stepsRemaining);
           v=printer_state.vMaxReached-v;
           if (v<cur->vEnd) v = cur->vEnd; // extra steps at the end of desceleration due to rounding erros
         }
+#ifdef USE_ADVANCE
+        unsigned int v0 = v;
+#endif
         if(v>STEP_DOUBLER_FREQUENCY) {
 #if ALLOW_QUADSTEPPING
           if(v>STEP_DOUBLER_FREQUENCY*2) {
@@ -1970,7 +1976,7 @@ OUT_P_L_LN("MSteps:",cur->stepsRemaining);
         for(byte loop=1;loop<max_loops;loop++) advance_target-=cur->advanceRate;
         if(advance_target<cur->advanceEnd)
           advance_target = cur->advanceEnd;
-        long h=mulu6xu16to32(cur->advanceL,v);
+        long h=mulu6xu16to32(cur->advanceL,v0);
         int tred = ((advance_target+h)>>16);
         cli();
         printer_state.extruderStepsNeeded+=tred-printer_state.advance_steps_set;
@@ -1978,7 +1984,7 @@ OUT_P_L_LN("MSteps:",cur->stepsRemaining);
         sei();
         printer_state.advance_executed = advance_target;
 #else
-        int tred=mulu6xu16shift16(cur->advanceL,v);
+        int tred=mulu6xu16shift16(cur->advanceL,v0);
         cli();
         printer_state.extruderStepsNeeded+=tred-printer_state.advance_steps_set;
         printer_state.advance_steps_set = tred;

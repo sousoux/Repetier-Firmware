@@ -948,6 +948,7 @@ void process_command(GCode *com)
 	#endif
 	}
 	break;
+    
     case 350: // Set microstepping mode. Warning: Steps per unit remains unchanged. S code sets stepping mode for all drivers.
     {
       OUT_P_LN("Set Microstepping");
@@ -994,15 +995,9 @@ void process_command(GCode *com)
 #endif
     case 401:
       OUT_P_I_LN("Linespos:",lines_pos);
+      OUT_P_I_LN("Writepos:",lines_write_pos);
       OUT_P_I_LN("Linescount:",lines_count);
-      OUT_P_L_LN("baud:",baudrate);
-      lines_count = 0;
-      break;
-    case 402:
-      extruder_select(current_extruder->id);
-      break;
-    case 403:
-      update_ramps_parameter();
+      //lines_count = 0;
       break;
     }
   } else if(GCODE_HAS_T(com))  { // Process T code

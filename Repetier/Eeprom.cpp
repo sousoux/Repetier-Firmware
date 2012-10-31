@@ -221,7 +221,6 @@ void epr_eeprom_reset() {
   update_ramps_parameter();
   initHeatedBed();
 }
-
 /** \brief Moves current settings to EEPROM.
 
 The values the are currently set are used to fill the eeprom.*/
@@ -570,7 +569,7 @@ void epr_output_settings() {
     epr_out_long(o+EPR_EXTRUDER_X_OFFSET,PSTR("X-offset [steps]"));
     epr_out_long(o+EPR_EXTRUDER_Y_OFFSET,PSTR("Y-offset [steps]"));
     epr_out_int(o+EPR_EXTRUDER_WATCH_PERIOD,PSTR("Temp. stabilize time [s]"));
-    epr_out_int(o+EPR_EXTRUDER_WAIT_RETRACT_TEMP,PSTR("Temp. to retract when heating [C]"));
+    epr_out_int(o+EPR_EXTRUDER_WAIT_RETRACT_TEMP,PSTR("Temp. for retraction when heating [C]"));
     epr_out_int(o+EPR_EXTRUDER_WAIT_RETRACT_UNITS,PSTR("Distance to retract when heating [mm]"));
 #ifdef USE_ADVANCE
 #ifdef ENABLE_QUADRATIC_ADVANCE
