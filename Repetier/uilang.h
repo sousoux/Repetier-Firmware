@@ -153,6 +153,8 @@
 #define UI_TEXT_UPLOADING         "Uploading..."
 #define UI_TEXT_PAGE_BUFFER       "Buffer:%oB"
 #define UI_TEXT_PAGE_EXTRUDER     "E:%ec/%Ec\002C\176%oC"
+#define UI_TEXT_PAGE_EXTRUDER1     "E1:%e0/%E0\002C\176%o0"
+#define UI_TEXT_PAGE_EXTRUDER2     "E2:%e1/%E1\002C\176%o1"
 #define UI_TEXT_PAGE_BED          "B:%eb/%Eb\002C\176%ob"
 #define UI_TEXT_SPEED_MULTIPLY    "Speed Mul.:%om%%%"
 #define UI_TEXT_FLOW_MULTIPLY     "Flow Mul.:%of%%%"
@@ -169,6 +171,7 @@
 #define UI_TEXT_EXTR_WAIT_RETRACT_UNITS "Wait Units: %XU mm"
 #define UI_TEXT_SD_REMOVED       "SD Card removed"
 #define UI_TEXT_SD_INSERTED      "SD Card inserted"
+#define UI_TEXT_PRINTER_READY    "Printer ready."
 
 // *************** german translation ****************
 
@@ -303,6 +306,8 @@
 #define UI_TEXT_UPLOADING         "Hochladen..."
 #define UI_TEXT_PAGE_BUFFER       "Puffer:%oB"
 #define UI_TEXT_PAGE_EXTRUDER     "E:%ec/%Ec\002C\176%oC"
+#define UI_TEXT_PAGE_EXTRUDER1     "E1:%e0/%E0\002C\176%o0"
+#define UI_TEXT_PAGE_EXTRUDER2     "E2:%e1/%E1\002C\176%o1"
 #define UI_TEXT_PAGE_BED          "B:%eb/%Eb\002C\176%ob"
 #define UI_TEXT_SPEED_MULTIPLY    "Geschw.Mul:%om%%%"
 #define UI_TEXT_FLOW_MULTIPLY     "Flow Mul.:%of%%%"
@@ -321,6 +326,7 @@
 #define UI_TEXT_EXTR_WAIT_RETRACT_UNITS "Wait Units:%XUmm"
 #define UI_TEXT_SD_REMOVED       "Karte entfernt"
 #define UI_TEXT_SD_INSERTED      "Karte eingelegt"
+#define UI_TEXT_PRINTER_READY    "Drucker bereit."
 
 #endif
 
@@ -458,6 +464,8 @@
 #define UI_TEXT_UPLOADING         "Uploaden..."
 #define UI_TEXT_PAGE_BUFFER       "Buffer:%oB"
 #define UI_TEXT_PAGE_EXTRUDER     "E:%ec/%Ec\002C\176%oC"
+#define UI_TEXT_PAGE_EXTRUDER1     "E1:%e0/%E0\002C\176%o0"
+#define UI_TEXT_PAGE_EXTRUDER2     "E2:%e1/%E1\002C\176%o1"
 #define UI_TEXT_PAGE_BED          "B:%eb/%Eb\002C\176%ob"
 #define UI_TEXT_SPEED_MULTIPLY    "Snelh. Mul.:%om%%%"
 #define UI_TEXT_FLOW_MULTIPLY     "Flow Mul.:%of%%%"
@@ -606,10 +614,13 @@
 #define UI_TEXT_UPLOADING         "Uploading..."
 #define UI_TEXT_PAGE_BUFFER       "Buffer:%oB"
 #define UI_TEXT_PAGE_EXTRUDER     "E:%ec/%Ec\002C\176%oC"
+#define UI_TEXT_PAGE_EXTRUDER1     "E1:%e0/%E0\002C\176%o0"
+#define UI_TEXT_PAGE_EXTRUDER2     "E2:%e1/%E1\002C\176%o1"
 #define UI_TEXT_PAGE_BED          "B:%eb/%Eb\002C\176%ob"
 #define UI_TEXT_SPEED_MULTIPLY    "Speed Mul.:%om%%%"
 #define UI_TEXT_FLOW_MULTIPLY     "Flow Mul.:%of%%%"
 #define UI_TEXT_EXTR_WAIT_RETRACT_TEMP  "Wait Temp.%XT\002C"
 #define UI_TEXT_EXTR_WAIT_RETRACT_UNITS "Wait Units:%XUmm"
+#define UI_TEXT_PRINTER_READY    "Printer ready."
 
 #endif

@@ -1222,7 +1222,9 @@ void mc_arc(float *position, float *target, float *offset, float radius, uint8_t
   
   float millimeters_of_travel = fabs(angular_travel)*radius; //hypot(angular_travel*radius, fabs(linear_travel));
   if (millimeters_of_travel < 0.001) { return; }
-  uint16_t segments = (radius>=BIG_ARC_RADIUS ? floor(millimeters_of_travel/MM_PER_ARC_SEGMENT_BIG) : floor(millimeters_of_travel/MM_PER_ARC_SEGMENT));
+  //uint16_t segments = (radius>=BIG_ARC_RADIUS ? floor(millimeters_of_travel/MM_PER_ARC_SEGMENT_BIG) : floor(millimeters_of_travel/MM_PER_ARC_SEGMENT));
+  // Increase segment size if printing faster then computation speed allows
+  uint16_t segments = (printer_state.feedrate>60 ? floor(millimeters_of_travel/min(MM_PER_ARC_SEGMENT_BIG,printer_state.feedrate*0.01666*MM_PER_ARC_SEGMENT)) : floor(millimeters_of_travel/MM_PER_ARC_SEGMENT));
   if(segments == 0) segments = 1;
   /*  
     // Multiply inverse feed_rate to compensate for the fact that this movement is approximated
