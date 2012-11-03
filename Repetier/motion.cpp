@@ -169,6 +169,7 @@ if (isnan(x)) {
 
 /**
 Compute the maximum speed from the last entered move.
+The backwards planner traverses the moves from last to first looking at deceleration. The RHS of the accelerate/decelerate ramp.
 
 p = last line inserted
 last = last element until we check
@@ -206,6 +207,15 @@ inline void backwardPlanner(byte p,byte last) {
       }
     }
 #endif
+/* To test - Avoid speed calc once crusing in split delta move
+	#if DRIVE_SYSTEM==3
+	if (prev->moveID==act->moveID && lastJunctionSpeed==prev->maxJunctionSpeed) {
+      act->startSpeed = prev->endSpeed = lastJunctionSpeed;
+      prev->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
+      act->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
+	}
+	#endif
+*/
     // Switch move-retraction or vice versa start always with save speeds! Keeps extruder from blocking
 	if(((prev->dir & 240)!=128) && ((act->dir & 240)==128)) { // switch move - extruder only move
       prev->joinFlags |= FLAG_JOIN_END_FIXED;
@@ -216,21 +226,26 @@ inline void backwardPlanner(byte p,byte last) {
       act->joinFlags |= FLAG_JOIN_START_FIXED; // Wait only with safe speeds!
       return;
     }
+	// If you accelerate from end of move to start what speed to you reach?
     lastJunctionSpeed = sqrt(lastJunctionSpeed*lastJunctionSpeed+act->acceleration); // acceleration is acceleration*distance*2! What can be reached if we try?
+	// If that speed is more that the maximum junction speed allowed then ...
     if(lastJunctionSpeed>=prev->maxJunctionSpeed) { // Limit is reached
+	  // If the previous line's end speed has not been updated to maximum speed then do it now
       if(prev->endSpeed!=prev->maxJunctionSpeed) {
         prev->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
         prev->endSpeed = prev->maxJunctionSpeed; // possibly unneeded???
-      }        
+      }
+	  // If actual line start speed has not been updated to maximum speed then do it now
       if(act->startSpeed!=prev->maxJunctionSpeed) {
         act->startSpeed = prev->maxJunctionSpeed; // possibly unneeded???
         act->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
-    }
+      }
       lastJunctionSpeed = prev->maxJunctionSpeed;     
     } else {
-    act->startSpeed = prev->endSpeed = lastJunctionSpeed;
-    prev->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
-    act->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
+	  // Block prev end and act start as calculated speed and recalculate plateau speeds (which could move the speed higher again)
+      act->startSpeed = prev->endSpeed = lastJunctionSpeed;
+      prev->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
+      act->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
     }
     act = prev;
   } // while loop
@@ -242,7 +257,6 @@ inline void forwardPlanner(byte p) {
   //NEXT_PLANNER_INDEX(last);
   next = &lines[p];
   float leftspeed = next->startSpeed;
-   //   testnum(leftspeed,'E');
 
   while(p!=last) { // All except last segment, which has fixed end speed
     act = next;
@@ -250,14 +264,20 @@ inline void forwardPlanner(byte p) {
     next = &lines[p];
     if(act->joinFlags & FLAG_JOIN_END_FIXED) {
       leftspeed = act->endSpeed;
-    //  testnum(leftspeed,'A');
       continue; // Nothing to do here
     }
-    //      testnum(leftspeed,'C');
-    //  testnum(act->acceleration,'D');
-
+/* To test - Avoid speed calc once crusing in split delta move	
+	#if DRIVE_SYSTEM==3
+	if (act->moveID == next->moveID && act->endSpeed == act->maxJunctionSpeed) {
+		act->startSpeed = leftspeed;
+		leftspeed       = act->endSpeed;
+	    act->joinFlags  |= FLAG_JOIN_END_FIXED;
+        next->joinFlags |= FLAG_JOIN_START_FIXED;
+		continue;
+	}
+	#endif
+*/
     float vmax_right = sqrt(leftspeed*leftspeed+act->acceleration); // acceleration is 2*acceleration*distance!, 1000 Ticks
-   //   testnum(vmax_right,'B');
     if(vmax_right>act->endSpeed) { // Could be higher next run?
       act->startSpeed = leftspeed;
       leftspeed       = act->endSpeed;

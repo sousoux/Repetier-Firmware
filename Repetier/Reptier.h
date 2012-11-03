@@ -21,17 +21,9 @@
 
 #ifndef _REPETIER_H
 #define _REPETIER_H
-#include "Configuration.h"
 
-#if MOTHERBOARD != 401
-#include <avr/io.h>
-#else
-#define PROGMEM
-#define PGM_P const char *
-#define PSTR(s) s
-#define pgm_read_byte_near(x) (*(char*)x)
-#define pgm_read_byte(x) (*(char*)x)
-#endif
+#define REPETIER_VERSION "0.80dev"
+
 // ##########################################################################################
 // ##                                  Debug configuration                                 ##
 // ##########################################################################################
@@ -99,8 +91,22 @@ usage or for seraching for memory induced errors. Switch it off for production, 
 
 //Step to split a cirrcle in small Lines 
 #define MM_PER_ARC_SEGMENT 1
+#define MM_PER_ARC_SEGMENT_BIG 3
+
 //After this count of steps a new SIN / COS caluclation is startet to correct the circle interpolation
 #define N_ARC_CORRECTION 25
+
+#include "Configuration.h"
+#if MOTHERBOARD != 401
+#include <avr/io.h>
+#else
+#define PROGMEM
+#define PGM_P const char *
+#define PSTR(s) s
+#define pgm_read_byte_near(x) (*(char*)x)
+#define pgm_read_byte(x) (*(char*)x)
+#endif
+
 #define KOMMA
 #if NUM_EXTRUDER>0 && EXT0_TEMPSENSOR_TYPE<100
 #define EXT0_ANALOG_INPUTS 1
@@ -178,7 +184,12 @@ usage or for seraching for memory induced errors. Switch it off for production, 
 #if SDSUPPORT
 #include "SdFat.h"
 #endif
-#define REPETIER_VERSION "0.80dev"
+#ifndef SDSUPPORT
+#define SDSUPPORT false
+#endif
+#if SDSUPPORT
+#include "SdFat.h"
+#endif
 
 #if ENABLE_BACKLASH_COMPENSATION && DRIVE_SYSTEM!=0
 #undef ENABLE_BACKLASH_COMPENSATION
