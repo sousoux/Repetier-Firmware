@@ -22,6 +22,8 @@
 #ifndef _REPETIER_H
 #define _REPETIER_H
 
+#include <avr/io.h>
+
 #define REPETIER_VERSION "0.80dev"
 
 // ##########################################################################################
