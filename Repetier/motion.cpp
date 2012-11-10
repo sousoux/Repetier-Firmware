@@ -207,7 +207,7 @@ inline void backwardPlanner(byte p,byte last) {
       }
     }
 #endif
-/* To test - Avoid speed calc once crusing in split delta move
+	// Avoid speed calc once crusing in split delta move
 	#if DRIVE_SYSTEM==3
 	if (prev->moveID==act->moveID && lastJunctionSpeed==prev->maxJunctionSpeed) {
       act->startSpeed = prev->endSpeed = lastJunctionSpeed;
@@ -215,7 +215,7 @@ inline void backwardPlanner(byte p,byte last) {
       act->joinFlags &= ~FLAG_JOIN_STEPPARAMS_COMPUTED; // Needs recomputation
 	}
 	#endif
-*/
+
     // Switch move-retraction or vice versa start always with save speeds! Keeps extruder from blocking
 	if(((prev->dir & 240)!=128) && ((act->dir & 240)==128)) { // switch move - extruder only move
       prev->joinFlags |= FLAG_JOIN_END_FIXED;
@@ -226,8 +226,13 @@ inline void backwardPlanner(byte p,byte last) {
       act->joinFlags |= FLAG_JOIN_START_FIXED; // Wait only with safe speeds!
       return;
     }
-	// If you accelerate from end of move to start what speed to you reach?
-    lastJunctionSpeed = sqrt(lastJunctionSpeed*lastJunctionSpeed+act->acceleration); // acceleration is acceleration*distance*2! What can be reached if we try?
+	
+	// Avoid speed calcs if we know we can accelerate within the line
+	if (act->flags & FLAG_NOMINAL)
+	  lastJunctionSpeed = act->fullSpeed;
+	else
+	  // If you accelerate from end of move to start what speed to you reach?
+      lastJunctionSpeed = sqrt(lastJunctionSpeed*lastJunctionSpeed+act->acceleration); // acceleration is acceleration*distance*2! What can be reached if we try?
 	// If that speed is more that the maximum junction speed allowed then ...
     if(lastJunctionSpeed>=prev->maxJunctionSpeed) { // Limit is reached
 	  // If the previous line's end speed has not been updated to maximum speed then do it now
@@ -250,6 +255,7 @@ inline void backwardPlanner(byte p,byte last) {
     act = prev;
   } // while loop
 }
+
 inline void forwardPlanner(byte p) {
   PrintLine *act,*next;
   if(p==lines_write_pos) return;
@@ -266,7 +272,7 @@ inline void forwardPlanner(byte p) {
       leftspeed = act->endSpeed;
       continue; // Nothing to do here
     }
-/* To test - Avoid speed calc once crusing in split delta move	
+	// Avoid speed calc once crusing in split delta move	
 	#if DRIVE_SYSTEM==3
 	if (act->moveID == next->moveID && act->endSpeed == act->maxJunctionSpeed) {
 		act->startSpeed = leftspeed;
@@ -276,8 +282,14 @@ inline void forwardPlanner(byte p) {
 		continue;
 	}
 	#endif
-*/
-    float vmax_right = sqrt(leftspeed*leftspeed+act->acceleration); // acceleration is 2*acceleration*distance!, 1000 Ticks
+
+
+    float vmax_right;
+	// Avoid speed calcs if we know we can accelerate within the line.
+	if (act->flags & FLAG_NOMINAL)
+	  vmax_right = act->fullSpeed;
+	else
+      vmax_right = sqrt(leftspeed*leftspeed+act->acceleration); // acceleration is 2*acceleration*distance!, 1000 Ticks
     if(vmax_right>act->endSpeed) { // Could be higher next run?
       act->startSpeed = leftspeed;
       leftspeed       = act->endSpeed;
@@ -466,6 +478,8 @@ void log_printLine(PrintLine *p) {
 #endif
 #endif
 }
+
+
 void calculate_move(PrintLine *p,float axis_diff[],byte check_endstops,byte pathOptimize)
 {
 #if DRIVE_SYSTEM==3
@@ -557,6 +571,10 @@ void calculate_move(PrintLine *p,float axis_diff[],byte check_endstops,byte path
     p->facceleration = 262144.0*(float)p->accelerationPrim/F_CPU; // will overflow without float!
     p->acceleration = 2.0*p->distance*slowest_axis_plateau_time_repro*p->fullSpeed/((float)F_CPU); // mm^2/s^2
     p->startSpeed = p->endSpeed = safeSpeed(p);
+	// Can accelerate to full speed within the line
+	if (sqrt(p->startSpeed*p->startSpeed+p->acceleration) >= p->fullSpeed)
+		p->flags |= FLAG_NOMINAL;
+
     p->vMax = F_CPU / p->fullInterval; // maximum steps per second, we can reach
    // if(p->vMax>46000)  // gets overflow in N computation
    //   p->vMax = 46000;
@@ -842,7 +860,6 @@ inline long calculate_delta_segments(PrintLine *p, byte softEndstop) {
 			destination_steps[i] += (printer_state.destinationSteps[i] - destination_steps[i]) / s;
 
 		// Wait for buffer here
-//		while(delta_segment_count>=DELTA_CACHE_SIZE) { // wait for a free entry in movement cache
 		while(delta_segment_count + produced_segments>=DELTA_CACHE_SIZE) { // wait for a free entry in movement cache
 			gcode_read_serial();
 			check_periodical();
@@ -887,7 +904,7 @@ inline long calculate_delta_segments(PrintLine *p, byte softEndstop) {
 			}
 		} else {
 			// Illegal position - idnore move
-			out.println_P(PSTR("Invalid delta coordinate"));
+			out.println_P(PSTR("Invalid delta coordinate - move ignored"));
 			d->dir = 0;
 			for(byte i=0; i < NUM_AXIS - 1; i++) {
 				d->deltaSteps[i]=0;
@@ -895,9 +912,6 @@ inline long calculate_delta_segments(PrintLine *p, byte softEndstop) {
 		}
 		// Move to the next segment
 		delta_segment_write_pos++; if (delta_segment_write_pos >= DELTA_CACHE_SIZE) delta_segment_write_pos=0;
-//		BEGIN_INTERRUPT_PROTECTED
-//		delta_segment_count++;
-//		END_INTERRUPT_PROTECTED
 		produced_segments++;
 	}
 	BEGIN_INTERRUPT_PROTECTED
@@ -930,18 +944,14 @@ inline void set_delta_position(long xaxis, long yaxis, long zaxis) {
 */
 byte calculate_delta(long cartesianPosSteps[], long deltaPosSteps[]) {
 	long temp;
-	long opt = sq(DELTA_TOWER1_Y_STEPS - cartesianPosSteps[Y_AXIS]);
+	long opt = DELTA_DIAGONAL_ROD_STEPS_SQUARED - sq(DELTA_TOWER1_Y_STEPS - cartesianPosSteps[Y_AXIS]);
 
-	if ((temp = DELTA_DIAGONAL_ROD_STEPS_SQUARED
-		 - sq(DELTA_TOWER1_X_STEPS - cartesianPosSteps[X_AXIS])
-		 - opt) >= 0)
+	if ((temp = opt - sq(DELTA_TOWER1_X_STEPS - cartesianPosSteps[X_AXIS])) >= 0)
 		deltaPosSteps[X_AXIS] = sqrt(temp) + cartesianPosSteps[Z_AXIS];
 	else
 		return 0;
 
-	if ((temp = DELTA_DIAGONAL_ROD_STEPS_SQUARED
-		 - sq(DELTA_TOWER2_X_STEPS - cartesianPosSteps[X_AXIS])
-		 - opt) >= 0)
+	if ((temp = opt - sq(DELTA_TOWER2_X_STEPS - cartesianPosSteps[X_AXIS])) >= 0)
 		deltaPosSteps[Y_AXIS] = sqrt(temp) + cartesianPosSteps[Z_AXIS];
 	else
 		return 0;
@@ -1132,7 +1142,8 @@ void split_delta_move(byte check_endstops,byte pathOptimize, byte softEndstop) {
 	}
 
 	// Insert dummy moves if necessary
-	byte newPath=check_new_move(pathOptimize, min(MOVE_CACHE_SIZE-3,num_lines-1));
+	// Nead to leave at least one slot open for the first split move
+	byte newPath=check_new_move(pathOptimize, min(MOVE_CACHE_SIZE-4,num_lines-1));
 
 	for (int line_number=1; line_number < num_lines + 1; line_number++) {
 		while(lines_count>=MOVE_CACHE_SIZE) { // wait for a free entry in movement cache
