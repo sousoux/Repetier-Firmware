@@ -109,11 +109,6 @@ Mega.
 #define XAXIS_STEPS_PER_MM AXIS_STEPS_PER_MM
 #define YAXIS_STEPS_PER_MM AXIS_STEPS_PER_MM
 #define ZAXIS_STEPS_PER_MM AXIS_STEPS_PER_MM
-// Maximum travel length - For delta robot this is the maximum travel of the towers not cartesian
-// This is also the maximum Z value. I plan to add a measure mode to set this
-// This value will be overidden with the value in the EEPROM
-// Defined in mm
-#define ROD_MAX_LENGTH 600
 
 #else
 /** \brief Number of steps for a 1mm move in x direction. Overridden if EEPROM activated. */
@@ -619,7 +614,11 @@ on this endstop.
 // false signals from your endstops. If your endstops don't give false signals, you
 // can set it on for safety.
 #define ALWAYS_CHECK_ENDSTOPS false
+
 // maximum positions in mm - only fixed numbers!
+// For delta robot Z_MAX_LENGTH is maximum travel of the towers and should be set to the distance between the hotend
+// and the platform when the printer is at its home position.
+// If EEPROM is enabled these values will be overidden with the values in the EEPROM
 #define X_MAX_LENGTH 200
 #define Y_MAX_LENGTH 200
 #define Z_MAX_LENGTH 500
