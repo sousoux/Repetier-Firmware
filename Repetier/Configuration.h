@@ -68,7 +68,7 @@ is a full cartesian system where x, y and z moves are handled by seperate motors
 0 = full cartesian system, xyz have seperate motors.
 1 = z axis + xy H-gantry (x_motor = x+y, y_motor = x-y)
 2 = z axis + xy H-gantry (x_motor = x+y, y_motor = y-x)
-3 = Rostock Delta
+3 = Delta printers (Rostock, Kossel, RostockMax, Cerberus, etc)
 Cases 1 and 2 cover all needed xy H gantry systems. If you get results mirrored etc. you can swap motor connections for x and y. If a motor turns in 
 the wrong direction change INVERT_X_DIR or INVERT_Y_DIR.
 */
@@ -78,9 +78,14 @@ the wrong direction change INVERT_X_DIR or INVERT_Y_DIR.
 // ##                               Calibration                                            ##
 // ##########################################################################################
 
-/** Preprocess movement for the Rostock Delta printer
+/** Drive settings for the Delta printers
 */
 #if DRIVE_SYSTEM==3
+/** \brief Delta drive type: 0 - belts and pulleys, 1 - filament drive
+*/
+#define DELTA_DRIVE_TYPE 0
+
+#if DELTA_DRIVE_TYPE == 0
 /** \brief Pitch in mm of drive belt. GT2 = 2mm
 */
 #define BELT_PITCH 2
@@ -88,6 +93,18 @@ the wrong direction change INVERT_X_DIR or INVERT_Y_DIR.
 /** \brief Number of teeth on X, Y and Z tower pulleys
 */
 #define PULLEY_TEETH 20
+
+#define PULLEY_CIRCUMFERENCE (BELT_PITCH * PULLEY_TEETH)
+
+#elif DELTA_DRIVE_TYPE == 1
+
+/** \brief Filament pulley diameter in milimeters
+*/
+#define PULLEY_DIAMETER 10
+
+#define PULLEY_CIRCUMFERENCE (PULLEY_DIAMETER * 3.1415927)
+
+#endif
 
 /** \brief Steps per rotation of stepper motor
 */
@@ -105,12 +122,15 @@ Mega.
 #define MAX_DELTA_SEGMENTS_PER_LINE 30
 
 // Calculations
-#define AXIS_STEPS_PER_MM ((MICRO_STEPS * STEPS_PER_ROTATION) / (BELT_PITCH * PULLEY_TEETH))
+#define AXIS_STEPS_PER_MM ((MICRO_STEPS * STEPS_PER_ROTATION) / PULLEY_CIRCUMFERENCE)
 #define XAXIS_STEPS_PER_MM AXIS_STEPS_PER_MM
 #define YAXIS_STEPS_PER_MM AXIS_STEPS_PER_MM
 #define ZAXIS_STEPS_PER_MM AXIS_STEPS_PER_MM
 
 #else
+/** Drive settings for printers with cartesian drive systems
+*/
+
 /** \brief Number of steps for a 1mm move in x direction. Overridden if EEPROM activated. */
 #define XAXIS_STEPS_PER_MM 101.859
 /** \brief Number of steps for a 1mm move in y direction  Overridden if EEPROM activated.*/
