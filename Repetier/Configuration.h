@@ -809,7 +809,7 @@ don't care about empty buffers during print.
 This value must be high enough, that the buffer has time to fill up. The problem only occurs at the beginning of a print or
 if you are printing many very short segments at high speed. Higher delays here allow higher values in PATH_PLANNER_CHECK_SEGMENTS.
 */
-#define LOW_TICKS_PER_MOVE 150000
+#define LOW_TICKS_PER_MOVE 250000
 
 // ##########################################################################################
 // ##                           Extruder control                                           ##

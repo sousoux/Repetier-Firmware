@@ -705,7 +705,7 @@ void process_command(GCode *com)
 #if EEPROM_MODE!=0
         float dist = printer_state.filamentPrinted*0.001+epr_get_float(EPR_PRINTING_DISTANCE);
         OUT_P_FX("Printed filament:",dist,2);
-        OUT_P_LN(" mm");
+        OUT_P_LN(" m");
         bool alloff = true;
         for(byte i=0;i<NUM_EXTRUDER;i++)
           if(tempController[i]->targetTemperatureC>15) alloff = false;

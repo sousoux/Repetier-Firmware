@@ -56,14 +56,14 @@ usage or for seraching for memory induced errors. Switch it off for production, 
 // Uncomment if no analyzer is connected
 //#define ANALYZER
 // Channel->pin assignments
-#define ANALYZER_CH0 -1 // New move
-#define ANALYZER_CH1 -1 // Step loop
-#define ANALYZER_CH2 -1 // X Step
-#define ANALYZER_CH3 -1 // Y Step
-#define ANALYZER_CH4 -1 // Serial out
-#define ANALYZER_CH5 -1 // Step 0
-#define ANALYZER_CH6 -1 // Step Signal
-#define ANALYZER_CH7 -1 // Constant speed
+#define ANALYZER_CH0 63 // New move
+#define ANALYZER_CH1 40 // Step loop
+#define ANALYZER_CH2 53 // X Step
+#define ANALYZER_CH3 65 // Y Step
+#define ANALYZER_CH4 59 // Serial out
+#define ANALYZER_CH5 64 // Step 0
+#define ANALYZER_CH6 58 // Step Signal
+#define ANALYZER_CH7 1 // Constant speed
 
 #ifdef ANALYZER
 #define ANALYZER_ON(a) {WRITE(a,HIGH);}
