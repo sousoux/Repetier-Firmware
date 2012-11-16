@@ -142,7 +142,8 @@ void updateStepsParameter(PrintLine *p/*,byte caller*/) {
       out.println_int_P(PSTR("/"),p->vEnd);
       out.print_int_P(PSTR("accel/decel steps:"),p->accelSteps);
       out.println_int_P(PSTR("/"),p->decelSteps);
-      out.print_float_P(PSTR("st./end speed:"),p->startSpeed);
+      out.print_float_P(PSTR("st./full/end speed:"),p->startSpeed);
+      out.print_float_P(PSTR("/"),p->fullSpeed);
       out.println_float_P(PSTR("/"),p->endSpeed);
 #if USE_OPS==1
       if(!(p->dir & 128) && printer_state.opsMode==2)
@@ -372,7 +373,7 @@ void updateTrapezoids(byte p) {
 // ##########################################################################
 
 inline float safeSpeed(PrintLine *p) {
-  float safe = min(p->fullSpeed,printer_state.maxJerk*0.5);
+  float safe = printer_state.maxJerk*0.5;
 #if DRIVE_SYSTEM != 3
   if(p->dir & 64) {
     if(fabs(p->speedZ)>printer_state.maxZJerk*0.5) {
@@ -538,7 +539,6 @@ void calculate_move(PrintLine *p,float axis_diff[],byte check_endstops,byte path
 #endif
   p->fullSpeed = p->distance*inv_time_s;
 
-
   //long interval = axis_interval[primary_axis]; // time for every step in ticks with full speed
   byte is_print_move = (p->dir & 136)==136; // are we printing
 #if USE_OPS==1
@@ -642,6 +642,7 @@ void calculate_move(PrintLine *p,float axis_diff[],byte check_endstops,byte path
       OUT_P_F_LN("Move distance on the XYZ space:", p->distance);
       OUT_P_F_LN("Commanded feedrate:", printer_state.feedrate);
       OUT_P_F_LN("Constant full speed move time:", time_for_move);
+      OUT_P_I_LN("DeltaID:", (int)p->moveID);
       //log_long_array(PSTR("axis_int"),(long*)axis_interval);
       //out.println_float_P(PSTR("Plateau repro:"),slowest_axis_plateau_time_repro);
   }
@@ -1197,6 +1198,7 @@ void split_delta_move(byte check_endstops,byte pathOptimize, byte softEndstop) {
 		if (virtual_axis_move == 0 && p->delta[3] == 0) {
 			if (num_lines!=1)
 				OUT_P_LN("ERROR: No move in delta segment with > 1 segment. This should never happen and may cause a problem!");
+//			OUT_P_LN("DSKIP");
 			return;  // Line too short in low precision area
 		}
 		p->primaryAxis = 4; // Virtual axis will lead bresenham step either way

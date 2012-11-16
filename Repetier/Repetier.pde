@@ -337,27 +337,35 @@ void setup()
 // Channel->pin assignments
 #if ANALYZER_CH0>=0
 SET_OUTPUT(ANALYZER_CH0);
+ANALYZER_OFF(ANALYZER_CH0);
 #endif
 #if ANALYZER_CH1>=0
 SET_OUTPUT(ANALYZER_CH1);
+ANALYZER_OFF(ANALYZER_CH1);
 #endif
 #if ANALYZER_CH2>=0
 SET_OUTPUT(ANALYZER_CH2);
+ANALYZER_OFF(ANALYZER_CH2);
 #endif
 #if ANALYZER_CH3>=0
 SET_OUTPUT(ANALYZER_CH3);
+ANALYZER_OFF(ANALYZER_CH3);
 #endif
 #if ANALYZER_CH4>=0
 SET_OUTPUT(ANALYZER_CH4);
+ANALYZER_OFF(ANALYZER_CH4);
 #endif
 #if ANALYZER_CH5>=0
 SET_OUTPUT(ANALYZER_CH5);
+ANALYZER_OFF(ANALYZER_CH5);
 #endif
 #if ANALYZER_CH6>=0
 SET_OUTPUT(ANALYZER_CH6);
+ANALYZER_OFF(ANALYZER_CH6);
 #endif
 #if ANALYZER_CH7>=0
 SET_OUTPUT(ANALYZER_CH7);
+ANALYZER_OFF(ANALYZER_CH7);
 #endif
 #endif
 
@@ -989,6 +997,7 @@ long curd_errupd, stepsPerSegRemaining;
 inline long bresenham_step() {
 	if(cur == 0) {
 		sei();
+		ANALYZER_ON(ANALYZER_CH0);
 		cur = &lines[lines_pos];
 		if(cur->flags & FLAG_BLOCKED) { // This step is in computation - shouldn't happen
 			if(lastblk!=(int)cur) {
@@ -1254,6 +1263,7 @@ inline long bresenham_step() {
 				// Take delta steps
 				if(curd->dir & 16) {
 					if((cur->error[0] -= curd->deltaSteps[0]) < 0) {
+						ANALYZER_TOGGLE(ANALYZER_CH2);
 						WRITE(X_STEP_PIN,HIGH);
 						cur->error[0] += curd_errupd;
 					#ifdef DEBUG_STEPCOUNT
@@ -1264,6 +1274,7 @@ inline long bresenham_step() {
 
 				if(curd->dir & 32) {
 					if((cur->error[1] -= curd->deltaSteps[1]) < 0) {
+						ANALYZER_TOGGLE(ANALYZER_CH3);
 						WRITE(Y_STEP_PIN,HIGH);
 						cur->error[1] += curd_errupd;
 					#ifdef DEBUG_STEPCOUNT
@@ -1274,6 +1285,7 @@ inline long bresenham_step() {
 
 				if(curd->dir & 64) {
 					if((cur->error[2] -= curd->deltaSteps[2]) < 0) {
+						ANALYZER_TOGGLE(ANALYZER_CH1);
 						WRITE(Z_STEP_PIN,HIGH);
 						printer_state.countZSteps += ( cur->dir & 4 ? 1 : -1 );
 						cur->error[2] += curd_errupd;
@@ -1293,7 +1305,6 @@ inline long bresenham_step() {
 				if (!stepsPerSegRemaining) {
 					cur->numDeltaSegments--;
 					if (cur->numDeltaSegments) {
-
 						// Get the next delta segment
 						curd = &segments[cur->deltaSegmentReadPos++];
 						if (cur->deltaSegmentReadPos >= DELTA_CACHE_SIZE) cur->deltaSegmentReadPos=0;
@@ -1433,6 +1444,7 @@ inline long bresenham_step() {
 			#endif
 		#endif
 			} else {
+				ANALYZER_ON(ANALYZER_CH7);
 				// If we had acceleration, we need to use the latest vMaxReached and interval
 				// If we started full speed, we need to use cur->fullInterval and vMax
 		#ifdef USE_ADVANCE
@@ -1509,6 +1521,8 @@ inline long bresenham_step() {
 		interval = printer_state.interval;
 	if(do_even) {
 		if(cur->stepsRemaining<=0 || (cur->dir & 240)==0) { // line finished
+			ANALYZER_OFF(ANALYZER_CH0);
+			ANALYZER_OFF(ANALYZER_CH7);
 //			out.println_int_P(PSTR("Line finished: "), (int) cur->numDeltaSegments);
 //			out.println_int_P(PSTR("DSC: "), (int) delta_segment_count);
 //			out.println_P(PSTR("F"));
